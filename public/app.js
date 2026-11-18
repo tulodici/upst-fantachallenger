@@ -1,4 +1,5 @@
 import { tierOf } from '/shared/rules.js';
+import { flag } from '/flags.js';
 
 const tg = window.Telegram?.WebApp;
 tg?.ready();
@@ -92,7 +93,7 @@ async function openPicker({ title, mode, onPick }) {
     list.replaceChildren(...[
       ...rows.slice(0, limit).map((p) => h('button', { class: 'item', onClick: () => { back.remove(); onPick(p); } },
         h('span', { class: `pos ${posClass(p.pos)}` }, `#${p.pos}`),
-        h('span', { class: 'grow' }, h('div', { class: 'ellipsis', style: 'font-weight:600' }, p.name, p.country ? h('span', { class: 'small' }, `  ${p.country}`) : null)))),
+        h('span', { class: 'grow' }, h('div', { class: 'ellipsis', style: 'font-weight:600' }, p.country ? `${flag(p.country)} ` : null, p.name)))),
       rows.length > limit && h('button', { class: 'item', onClick: () => { limit += STEP; paint(); } }, h('span', { class: 'muted grow center', style: 'padding:6px' }, `Mostra altri ${Math.min(STEP, rows.length - limit)} (${rows.length - limit} rimanenti)`)),
       rows.length === 0 && h('div', { class: 'muted center' }, 'Nessun giocatore trovato'),
     ].filter(Boolean));
@@ -120,7 +121,7 @@ async function openTournamentPicker({ tournament, selectedId, captainId, onPick,
         const isCap = p.playerId === captainId;
         return h('button', { class: `item ${p.playerId === selectedId ? 'sel' : ''}`, disabled: isCap, onClick: () => { back.remove(); onPick(p); } },
           h('span', { style: 'display:inline-block;min-width:38px;font-weight:600' }, entryTag(p)),
-          h('span', { class: 'grow' }, h('div', { class: 'ellipsis', style: 'font-weight:600' }, p.name, p.country ? h('span', { class: 'small' }, `  ${p.country}`) : null),
+          h('span', { class: 'grow' }, h('div', { class: 'ellipsis', style: 'font-weight:600' }, p.country ? `${flag(p.country)} ` : null, p.name),
             isCap ? h('div', { class: 'small tag-out' }, 'È il tuo capitano') : null),
           p.playerId === selectedId ? h('span', {}, '✓') : null);
       }),
@@ -148,7 +149,7 @@ function viewWelcome() {
     onPick: (p) => {
       chosen = p;
       chosenBox.className = 'slot captain';
-      chosenBox.replaceChildren(h('span', { class: 'badge', style: 'align-self:flex-start' }, 'Capitano ×2'), h('span', { class: 'name' }, p.name), h('span', { class: 'small' }, `#${p.pos} · ${p.country ?? ''}`));
+      chosenBox.replaceChildren(h('span', { class: 'badge', style: 'align-self:flex-start' }, 'Capitano ×2'), h('span', { class: 'name' }, p.name), h('span', { class: 'small' }, `#${p.pos}${p.country ? ` · ${flag(p.country)}` : ''}`));
       go.disabled = false;
     },
   }));
@@ -228,7 +229,7 @@ function viewTeam() {
         cap && h('div', { class: 'card captain' },
       h('div', { class: 'row spread' }, h('span', { class: 'badge' }, 'Capitano ×2'), h('span', { class: 'small' }, 'fisso per la stagione')),
       h('div', { style: 'font-weight:700;font-size:18px;margin-top:6px' }, cap.name),
-      h('div', { class: 'small' }, [cap.pos ? `#${cap.pos}` : 'fuori dal ranking', cap.country].filter(Boolean).join(' · '))),
+      h('div', { class: 'small' }, [cap.pos ? `#${cap.pos}` : 'fuori dal ranking', cap.country ? flag(cap.country) : null].filter(Boolean).join(' · '))),
     h('div', { class: 'row spread', style: 'margin:4px 2px 8px' }, h('h3', {}, 'Rosa'), h('span', { class: 'muted' }, `${roster.length}/${tournaments.length} tornei`)),
     tournaments.length === 0 && h('p', { class: 'muted center' }, 'I tornei di questa settimana non sono ancora disponibili.'),
     h('div', { class: 'cards' }, cards),
