@@ -1,6 +1,6 @@
 // Regole di gioco pure (RL-xx). Condivise tra backend e Mini App: nessuna dipendenza da Node o dal browser.
 
-export const ROSTER_SIZE = 7;
+// Vincoli top-125/top-200 (RL-11): non attivi sulla rosa per torneo, tenuti per un eventuale ripristino.
 export const MAX_TOP125 = 1;
 export const MAX_TOP200 = 3; // il top-125 e' incluso nel conteggio (RL-11)
 export const POOL_SIZE = 900;
@@ -45,9 +45,6 @@ function counts(positions) {
  * Restituisce { ok, code, reason } (reason in italiano, mostrato in app: RG-08).
  */
 export function canAdd(current, pos) {
-  if (current.length >= ROSTER_SIZE) {
-    return { ok: false, code: 'FULL', reason: 'Rosa completa (7 giocatori)' };
-  }
   const tier = tierOf(pos);
   if (tier === 'none') {
     return { ok: false, code: 'NOT_IN_POOL', reason: 'Fuori dai primi 900 del ranking' };
@@ -63,28 +60,28 @@ export function canAdd(current, pos) {
 }
 
 /**
- * Validazione completa di una rosa (RT-15). `entries` = [{ id, pos }], pos = ranking di riferimento o null.
+ * Validazione di una rosa "per torneo": un solo giocatore per torneo, scelto tra i suoi partecipanti.
+ * `tournaments` = [{ id, playerIds }]. I vincoli di classifica (top-125 / top-200, canAdd) non sono attivi sui giocatori
+ * della rosa; restano solo per il capitano (isCaptainEligible).
  * Ritorna { ok, errors: [{ code, playerId?, message }] }.
  */
-export function validateRoster(entries, { captainId = null, allowCaptainInRoster = false } = {}) {
+export function validatePicks(playerIds, { tournaments = [], captainId = null, allowCaptainInRoster = false } = {}) {
   const errors = [];
-  if (entries.length > ROSTER_SIZE) {
-    errors.push({ code: 'TOO_MANY', message: `Massimo ${ROSTER_SIZE} giocatori` });
-  }
   const seen = new Set();
-  for (const e of entries) {
-    if (seen.has(e.id)) errors.push({ code: 'DUPLICATE', playerId: e.id, message: 'Giocatore ripetuto' });
-    seen.add(e.id);
-    if (!inPool(e.pos)) {
-      errors.push({ code: 'NOT_IN_POOL', playerId: e.id, message: 'Giocatore fuori dal pool (top 900)' });
+  const used = new Set();
+  for (const id of playerIds) {
+    if (seen.has(id)) { errors.push({ code: 'DUPLICATE', playerId: id, message: 'Giocatore ripetuto' }); continue; }
+    seen.add(id);
+    if (!allowCaptainInRoster && captainId != null && id === captainId) {
+      errors.push({ code: 'IS_CAPTAIN', playerId: id, message: 'Il capitano non puo\' stare anche in rosa' });
+      continue;
     }
-    if (!allowCaptainInRoster && captainId != null && e.id === captainId) {
-      errors.push({ code: 'IS_CAPTAIN', playerId: e.id, message: 'Il capitano non puo\' stare anche in rosa' });
-    }
+    const t = tournaments.find((x) => !used.has(x.id) && x.playerIds.includes(id));
+    if (t) { used.add(t.id); continue; }
+    errors.push(tournaments.some((x) => x.playerIds.includes(id))
+      ? { code: 'ONE_PER_TOURNAMENT', playerId: id, message: 'Un solo giocatore per torneo' }
+      : { code: 'NOT_A_PARTICIPANT', playerId: id, message: 'Il giocatore non partecipa a nessun torneo di questa settimana' });
   }
-  const c = counts(entries.map((e) => e.pos));
-  if (c.top125 > MAX_TOP125) errors.push({ code: 'TOP125_LIMIT', message: 'Massimo 1 giocatore top-125' });
-  if (c.top200 > MAX_TOP200) errors.push({ code: 'TOP200_LIMIT', message: 'Massimo 3 giocatori top-200 in totale' });
   return { ok: errors.length === 0, errors };
 }
 

@@ -1,5 +1,5 @@
 import {
-  ROSTER_SIZE, POOL_SIZE, isCaptainEligible, validateRoster, pointsFor, withPositions,
+  POOL_SIZE, isCaptainEligible, validatePicks, pointsFor, withPositions,
 } from '../shared/rules.js';
 import { addDays, dayOfWeekOf, mondayOf, romeParts, romeToUtc, windowOf, windowState } from './time.js';
 import { QuotaExhaustedError } from './apiClient.js';
@@ -57,30 +57,23 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
 
   // ---------------------------------------------------------------- lista giocatori (My Team)
 
-  async function listPlayers(ctx, mode) {
+  /** Lista del solo capitano (201-900). La rosa settimanale si sceglie dai partecipanti ai tornei: vedi pickOptions. */
+  async function listPlayers(ctx) {
     if (!ctx.refWeek) return [];
-    const range = mode === 'captain' ? [201, POOL_SIZE] : [1, POOL_SIZE];
-    const rows = await db.all(
+    return db.all(
       `SELECT p.id, p.name, p.country, r.pos
          FROM rankings r JOIN players p ON p.id = r.player_id
         WHERE r.week_start = ? AND r.pos BETWEEN ? AND ?
         ORDER BY r.pos`,
-      [ctx.refWeek, range[0], range[1]],
+      [ctx.refWeek, 201, POOL_SIZE],
     );
-    if (mode === 'captain') return rows;
-    // RG-09: torneo in cui il giocatore gioca nella settimana, dal draw importato di domenica.
-    const entries = await db.all(
-      `SELECT d.player_id, d.kind, t.name AS tournament
-         FROM draw_entries d JOIN tournaments t ON t.id = d.tournament_id
-        WHERE t.week_start = ?`,
-      [ctx.weekStart],
-    );
-    const byPlayer = new Map(entries.map((e) => [e.player_id, e]));
-    return rows.map((r) => ({
-      ...r,
-      tournament: byPlayer.get(r.id)?.tournament ?? null,
-      drawKind: byPlayer.get(r.id)?.kind ?? null,
-    }));
+  }
+
+  /** Tornei della settimana di gioco con i partecipanti selezionabili (1 scelta per torneo). */
+  async function pickOptions(ctx) {
+    const ts = await tournamentsWithPeople(`week_start = ? AND status <> 'cancelled'`, [ctx.weekStart]);
+    await attachParticipants(ts);
+    return ts.map((t) => ({ id: t.id, name: t.name, location: t.location, participants: t.participants }));
   }
 
   // ---------------------------------------------------------------- utenti
@@ -122,9 +115,18 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     const row = await db.get('SELECT * FROM rosters WHERE user_id = ? AND week_start = ?', [user.id, ctx.weekStart]);
     const ids = row ? JSON.parse(row.player_ids) : [];
     if (ids.length === 0) return { ids, players: [], status: row?.status ?? null };
-    const all = await listPlayers(ctx, 'roster');
-    const byId = new Map(all.map((p) => [p.id, p]));
-    return { ids, players: ids.map((id) => byId.get(id)).filter(Boolean), status: row.status };
+    const options = await pickOptions(ctx);
+    const where = new Map(); // playerId -> { tournament, participant }
+    for (const t of options) for (const p of t.participants) if (!where.has(p.playerId)) where.set(p.playerId, { t, p });
+    const pos = await refPositions(ctx, ids);
+    const known = await db.all(`SELECT id, name, country FROM players WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
+    const byId = new Map(known.map((x) => [x.id, x]));
+    const players = ids.map((id) => {
+      const w = where.get(id);
+      const base = byId.get(id) ?? { id, name: w?.p.name ?? `Giocatore ${id}`, country: w?.p.country ?? null };
+      return { ...base, pos: pos.get(id) ?? null, tournamentId: w?.t.id ?? null, tournament: w?.t.name ?? null, seed: w?.p.seed ?? null, entry: w?.p.entry ?? null };
+    });
+    return { ids, players, status: row.status };
   }
 
   async function saveRoster(user, playerIds) {
@@ -134,10 +136,12 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
       throw new AppError('BAD_REQUEST', 'Elenco giocatori non valido');
     }
     if (!ctx.open) throw new AppError('WINDOW_CLOSED', 'La finestra di selezione è chiusa', 423, { window: windowPayload(ctx) });
-    if (!ctx.refWeek) throw new AppError('NO_RANKING', 'Ranking non ancora disponibile', 503);
-    const pos = await refPositions(ctx, playerIds);
-    const entries = playerIds.map((id) => ({ id, pos: pos.get(id) ?? null }));
-    const v = validateRoster(entries, { captainId: user.captain_id, allowCaptainInRoster });
+    // Un solo giocatore per torneo, scelto tra i partecipanti (nessun vincolo di classifica sui giocatori della rosa).
+    const options = await pickOptions(ctx);
+    const v = validatePicks(playerIds, {
+      tournaments: options.map((t) => ({ id: t.id, playerIds: t.participants.map((p) => p.playerId) })),
+      captainId: user.captain_id, allowCaptainInRoster,
+    });
     if (!v.ok) throw new AppError('INVALID_ROSTER', v.errors[0].message, 422, { errors: v.errors });
     // RT-16: controllo del timestamp lato server immediatamente prima della scrittura.
     if (clock() >= ctx.closes) throw new AppError('WINDOW_CLOSED', 'La finestra di selezione è chiusa', 423);
@@ -275,7 +279,8 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
       ...base,
       user: { teamName: user.team_name, registeredAt: user.registered_at },
       captain: cap,
-      roster: { playerIds: roster.ids, players: roster.players, size: ROSTER_SIZE, editable: ctx.open },
+      roster: { playerIds: roster.ids, players: roster.players, editable: ctx.open },
+      tournaments: (await db.all(`SELECT id, name, location FROM tournaments WHERE week_start = ? AND status <> 'cancelled' ORDER BY name`, [ctx.weekStart])),
       points: await myPoints(user),
       captainOnlyNotice: !ctx.open && registeredAfterClose, // RG-11
     };
@@ -512,19 +517,21 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
 
   async function sendReminders() {
     const ctx = await context();
-    if (!ctx.open || !ctx.refWeek) return { sent: 0 };
+    if (!ctx.open) return { sent: 0 };
+    const total = (await db.get(`SELECT COUNT(*) AS n FROM tournaments WHERE week_start = ? AND status <> 'cancelled'`, [ctx.weekStart])).n;
+    if (!total) return { sent: 0 };
     const users = await db.all(
       `SELECT u.id, u.telegram_id, r.player_ids FROM users u
          LEFT JOIN rosters r ON r.user_id = u.id AND r.week_start = ?`,
       [ctx.weekStart],
     );
-    const todo = users.filter((u) => !u.player_ids || JSON.parse(u.player_ids).length < ROSTER_SIZE);
+    const filledOf = (u) => (u.player_ids ? JSON.parse(u.player_ids).length : 0);
+    const todo = users.filter((u) => filledOf(u) < total);
     let sent = 0;
     for (const u of todo) {
-      const filled = u.player_ids ? JSON.parse(u.player_ids).length : 0;
       const ok = await bot.sendMessage(
         u.telegram_id,
-        `🎾 Hai completato ${filled}/${ROSTER_SIZE} slot della rosa. La finestra chiude martedì alle 15:00: apri l'app e scegli i tuoi giocatori!`,
+        `🎾 Hai scelto ${filledOf(u)} giocatori su ${total} tornei. La finestra chiude martedì alle 15:00: apri l'app e completa la rosa!`,
         { openApp: true },
       );
       if (ok) sent++;
@@ -668,7 +675,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
   }
 
   return {
-    context, listPlayers, register, findUser, touchTeamName, saveRoster, getState, snapshotWeek, ensureSnapshots,
+    context, listPlayers, pickOptions, register, findUser, touchTeamName, saveRoster, getState, snapshotWeek, ensureSnapshots,
     recomputePoints, standings, completedTournaments, inProgressTournaments, nextWeekTournaments,
     importRanking, importDraws, importResults, sendReminders, dueJobs, runJob, defaultKey, tick,
     adminSetResults, adminStatus, audit, windowPayload, dayOfWeekOf, reconcileProvider,

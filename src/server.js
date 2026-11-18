@@ -82,9 +82,11 @@ export async function createApp(config = loadConfig(), overrides = {}) {
       if (p === '/api/state' && m === 'GET') return send(res, 200, await core.getState(auth.user));
 
       if (p === '/api/players' && m === 'GET') {
-        const mode = url.searchParams.get('mode') === 'captain' ? 'captain' : 'roster';
         const ctx = await core.context();
-        return send(res, 200, { weekStart: ctx.weekStart, refWeek: ctx.refWeek, players: await core.listPlayers(ctx, mode) });
+        if (url.searchParams.get('mode') === 'captain') {
+          return send(res, 200, { weekStart: ctx.weekStart, refWeek: ctx.refWeek, players: await core.listPlayers(ctx) });
+        }
+        return send(res, 200, { weekStart: ctx.weekStart, tournaments: await core.pickOptions(ctx) }); // rosa: partecipanti per torneo
       }
 
       if (p === '/api/register' && m === 'POST') {

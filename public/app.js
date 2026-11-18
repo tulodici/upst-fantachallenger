@@ -1,4 +1,4 @@
-import { canAdd, tierOf, ROSTER_SIZE } from '/shared/rules.js';
+import { tierOf } from '/shared/rules.js';
 
 const tg = window.Telegram?.WebApp;
 tg?.ready();
@@ -49,20 +49,21 @@ async function loadState() {
   S.state = await api('/api/state');
   S.loading = false;
 }
-async function getPlayers(mode) {
+async function getPlayers(mode) { // solo capitano: lista 201–900
   const key = `${mode}:${S.state.weekStart}`;
   if (!S.players[key]) S.players[key] = (await api(`/api/players?mode=${mode}`)).players;
   return S.players[key];
 }
+const getTournamentOptions = async () => (await api('/api/players?mode=roster')).tournaments; // sempre aggiornato
 
 // ------------------------------------------------------------------ regole (RG-12)
 function rulesContent() {
   return h('ul', { class: 'rules' },
     h('li', {}, h('b', {}, 'Capitano: '), 'lo scegli all\'iscrizione tra i giocatori dal 201° al 900° posto. Resta lo stesso per tutta la stagione e i suoi punti valgono il doppio. Segna anche se non compili la rosa.'),
-    h('li', {}, h('b', {}, 'Rosa: '), '7 giocatori ogni settimana, scelti tra i primi 900 del ranking ATP della settimana precedente. Al massimo 1 top-125 e 3 top-200 in totale (il top-125 conta tra i top-200).'),
+    h('li', {}, h('b', {}, 'Rosa: '), 'ogni settimana scegli un giocatore per ciascun torneo Challenger, tra i partecipanti del torneo. Puoi saltare un torneo: il numero di giocatori in rosa cambia di settimana in settimana.'),
     h('li', {}, h('b', {}, 'Orari: '), 'la rosa si modifica quante volte vuoi da lunedì 00:01 a martedì 15:00 (ora di Roma). Se non la compili resta vuota: non viene riportata quella della settimana prima.'),
     h('li', {}, h('b', {}, 'Punti: '), 'vincitore 10, finalista 5, semifinalista 2; il capitano 20 / 10 / 4. Contano solo i tornei ATP Challenger, anche per ritiro o walkover.'),
-    h('li', {}, 'Un giocatore è selezionabile anche se non è in tabellone: se non gioca, non ci sono rimedi.'),
+    h('li', {}, 'Se un giocatore scelto non gioca (ritiro, forfait), non ci sono rimedi.'),
     h('li', {}, 'A pari punti si occupa la stessa posizione in classifica.'),
     h('li', {}, 'Le informazioni sui tabelloni sono aggiornate solo agli orari di importazione e possono essere incomplete per qualificati e lucky loser.'),
   );
@@ -76,58 +77,59 @@ function openRules() {
   document.body.append(back);
 }
 
-// ------------------------------------------------------------------ selettore giocatori
-async function openPicker({ title, mode, current = [], captainId = null, replacing = null, onPick, onRemove }) {
+// ------------------------------------------------------------------ selettore capitano (201–900)
+async function openPicker({ title, mode, onPick }) {
   const players = await getPlayers(mode);
-  const others = current.filter((p) => p.id !== replacing?.id).map((p) => p.pos);
   const back = h('div', { class: 'sheet-back', onClick: (e) => e.target === back && back.remove() });
   const list = h('div', { class: 'list' });
   const search = h('input', { type: 'search', placeholder: 'Cerca per nome o posizione…', autocomplete: 'off' });
   const STEP = 120;
   let limit = STEP;
-  let tier = 'all';
-  const TIERS = [['all', 'Tutti'], ['top125', 'Top-125'], ['top200', '126–200'], ['other', 'Oltre 200']];
-  const chips = h('div', { class: 'chips' });
-  const paintChips = () => chips.replaceChildren(...TIERS.map(([k, label]) =>
-    h('button', { class: `chip ${tier === k ? 'on' : ''}`, onClick: () => { tier = k; limit = STEP; paintChips(); paint(); list.scrollTop = 0; } }, label)));
 
   function paint() {
     const q = search.value.trim().toLowerCase();
-    const rows = players.filter((p) => (tier === 'all' || tierOf(p.pos) === tier)
-      && (!q || p.name.toLowerCase().includes(q) || String(p.pos) === q || (p.country ?? '').toLowerCase() === q));
-    const LIMIT = limit;
+    const rows = players.filter((p) => !q || p.name.toLowerCase().includes(q) || String(p.pos) === q || (p.country ?? '').toLowerCase() === q);
     list.replaceChildren(...[
-      replacing && h('button', { class: 'item', onClick: () => { back.remove(); onRemove?.(replacing); } }, h('span', { class: 'tag-out' }, '✕  Rimuovi dalla rosa')),
-      ...rows.slice(0, LIMIT).map((p) => {
-        let verdict = { ok: true };
-        if (mode === 'roster') {
-          verdict = p.id === captainId ? { ok: false, reason: 'È il tuo capitano' }
-            : current.some((c) => c.id === p.id && c.id !== replacing?.id) ? { ok: false, reason: 'Già in rosa' }
-            : canAdd(others, p.pos);
-        }
-        const sub = mode === 'roster'
-          ? (verdict.ok ? (p.tournament ? `🎾 ${p.tournament}${p.drawKind === 'qualifier' ? ' (qualificazioni)' : ''}` : 'non in tabellone') : verdict.reason)
-          : (p.country ?? '');
-        return h('button', { class: 'item', disabled: !verdict.ok, onClick: () => { back.remove(); onPick(p); } },
-          h('span', { class: `pos ${posClass(p.pos)}` }, `#${p.pos}`),
-          h('span', { class: 'grow' },
-            h('div', { class: 'ellipsis', style: 'font-weight:600' }, p.name, p.country ? h('span', { class: 'small' }, `  ${p.country}`) : null),
-            h('div', { class: `small ellipsis ${verdict.ok ? '' : 'tag-out'}` }, sub)));
-      }),
-      rows.length > LIMIT && h('button', { class: 'item', onClick: () => { limit += STEP; paint(); } }, h('span', { class: 'muted grow center', style: 'padding:6px' }, `Mostra altri ${Math.min(STEP, rows.length - LIMIT)} (${rows.length - LIMIT} rimanenti)`)),
+      ...rows.slice(0, limit).map((p) => h('button', { class: 'item', onClick: () => { back.remove(); onPick(p); } },
+        h('span', { class: `pos ${posClass(p.pos)}` }, `#${p.pos}`),
+        h('span', { class: 'grow' }, h('div', { class: 'ellipsis', style: 'font-weight:600' }, p.name, p.country ? h('span', { class: 'small' }, `  ${p.country}`) : null)))),
+      rows.length > limit && h('button', { class: 'item', onClick: () => { limit += STEP; paint(); } }, h('span', { class: 'muted grow center', style: 'padding:6px' }, `Mostra altri ${Math.min(STEP, rows.length - limit)} (${rows.length - limit} rimanenti)`)),
       rows.length === 0 && h('div', { class: 'muted center' }, 'Nessun giocatore trovato'),
     ].filter(Boolean));
   }
   search.addEventListener('input', () => { limit = STEP; paint(); });
-  list.addEventListener('scroll', () => { // caricamento progressivo
-    if (list.scrollTop + list.clientHeight > list.scrollHeight - 240) {
-      const q = search.value;
-      if (list.querySelector('.item:last-child .muted')) { limit += STEP; paint(); }
-    }
-  });
-  paintChips();
   back.append(h('div', { class: 'sheet' },
-    h('header', {}, h('div', { class: 'row spread' }, h('h2', {}, title), h('button', { class: 'link', onClick: () => back.remove() }, 'Annulla')), search, mode === 'roster' ? chips : null),
+    h('header', {}, h('div', { class: 'row spread' }, h('h2', {}, title), h('button', { class: 'link', onClick: () => back.remove() }, 'Annulla')), search),
+    list));
+  document.body.append(back);
+  paint();
+}
+
+// ------------------------------------------------------------------ selettore per torneo (1 giocatore per torneo)
+const entryTag = (p) => (p.seed != null ? `[${p.seed}]` : p.entry ?? '');
+async function openTournamentPicker({ tournament, selectedId, captainId, onPick, onRemove }) {
+  const back = h('div', { class: 'sheet-back', onClick: (e) => e.target === back && back.remove() });
+  const list = h('div', { class: 'list' });
+  const search = h('input', { type: 'search', placeholder: 'Cerca un giocatore…', autocomplete: 'off' });
+  function paint() {
+    const q = search.value.trim().toLowerCase();
+    const rows = tournament.participants.filter((p) => !q || p.name.toLowerCase().includes(q) || (p.country ?? '').toLowerCase() === q);
+    list.replaceChildren(...[
+      selectedId && h('button', { class: 'item', onClick: () => { back.remove(); onRemove(); } }, h('span', { class: 'tag-out' }, '✕  Rimuovi dalla rosa')),
+      ...rows.map((p) => {
+        const isCap = p.playerId === captainId;
+        return h('button', { class: `item ${p.playerId === selectedId ? 'sel' : ''}`, disabled: isCap, onClick: () => { back.remove(); onPick(p); } },
+          h('span', { style: 'display:inline-block;min-width:38px;font-weight:600' }, entryTag(p)),
+          h('span', { class: 'grow' }, h('div', { class: 'ellipsis', style: 'font-weight:600' }, p.name, p.country ? h('span', { class: 'small' }, `  ${p.country}`) : null),
+            isCap ? h('div', { class: 'small tag-out' }, 'È il tuo capitano') : null),
+          p.playerId === selectedId ? h('span', {}, '✓') : null);
+      }),
+      rows.length === 0 && h('div', { class: 'muted center' }, tournament.participants.length ? 'Nessun giocatore trovato' : 'Partecipanti non ancora disponibili'),
+    ].filter(Boolean));
+  }
+  search.addEventListener('input', paint);
+  back.append(h('div', { class: 'sheet' },
+    h('header', {}, h('div', { class: 'row spread' }, h('h2', { class: 'ellipsis' }, tournament.name), h('button', { class: 'link', onClick: () => back.remove() }, 'Annulla')), search),
     list));
   document.body.append(back);
   paint();
@@ -162,7 +164,7 @@ function viewWelcome() {
 
   return h('div', { class: 'page' },
     h('div', { class: 'hero' }, h('div', {}, h('div', { class: 'muted' }, 'Benvenuto in'), h('h1', {}, '🎾 upst-fantachallenger'))),
-    h('div', { class: 'card' }, h('p', { style: 'margin:0' }, 'Ogni settimana scegli 7 giocatori e pronostichi i vincitori dei tornei ATP Challenger. Gioco gratuito, senza premi in denaro.')),
+    h('div', { class: 'card' }, h('p', { style: 'margin:0' }, 'Ogni settimana scegli un giocatore per ciascun torneo ATP Challenger e pronostichi chi andrà più avanti. Gioco gratuito, senza premi in denaro.')),
     closed && h('div', { class: 'notice' }, h('b', {}, 'Iscrizione a finestra chiusa. '),
       `La selezione della rosa è chiusa: finché non riapre${st.window.nextOpens ? ` (${fmtDateTime(st.window.nextOpens)})` : ''} segnerai solo con il capitano. Poi potrai comporre la rosa come tutti.`),
     !st.hasRanking && h('div', { class: 'notice' }, 'Il ranking non è ancora disponibile: riprova tra poco.'),
@@ -191,23 +193,25 @@ function viewTeam() {
       await loadState(); render();
     }
   }
-  const slots = Array.from({ length: ROSTER_SIZE }, (_, i) => {
-    const p = roster[i];
-    if (!p) {
-      return h('button', { class: 'slot empty', disabled: !open, onClick: () => openPicker({
-        title: 'Aggiungi un giocatore', mode: 'roster', current: roster, captainId: cap?.id,
-        onPick: (np) => save([...roster.map((x) => x.id), np.id]),
-      }) }, open ? '+ Scegli' : '—');
-    }
-    return h('button', { class: 'slot', disabled: !open, onClick: () => openPicker({
-      title: 'Cambia giocatore', mode: 'roster', current: roster, captainId: cap?.id, replacing: p,
-      onPick: (np) => save(roster.map((x) => (x.id === p.id ? np.id : x.id))),
-      onRemove: () => save(roster.filter((x) => x.id !== p.id).map((x) => x.id)),
-    }) },
-      h('span', { class: 'name ellipsis' }, p.name),
-      h('span', { class: 'row' }, h('span', { class: `pos ${posClass(p.pos)}` }, `#${p.pos}`),
-        h('span', { class: `small ellipsis ${p.tournament ? '' : 'tag-out'}` }, p.tournament ? `🎾 ${p.tournament}` : 'non in tabellone')));
+  const tournaments = st.tournaments ?? [];
+  const pickOf = (t) => roster.find((p) => p.tournamentId === t.id);
+  const orphans = roster.filter((p) => !tournaments.some((t) => t.id === p.tournamentId)); // giocatori non piu' in nessun torneo
+  const cards = tournaments.map((t) => {
+    const p = pickOf(t);
+    return h('button', { class: `slot ${p ? '' : 'empty'}`, disabled: !open, onClick: async () => {
+      let opts;
+      try { opts = (await getTournamentOptions()).find((x) => x.id === t.id); } catch (e) { return toast(e.message); }
+      if (!opts) return toast('Torneo non disponibile');
+      openTournamentPicker({
+        tournament: opts, selectedId: p?.id ?? null, captainId: cap?.id,
+        onPick: (np) => save([...roster.filter((x) => x.id !== p?.id).map((x) => x.id), np.playerId]),
+        onRemove: () => save(roster.filter((x) => x.id !== p?.id).map((x) => x.id)),
+      });
+    } },
+      h('span', { class: 'small ellipsis' }, `🎾 ${t.name}${t.location ? ` · ${t.location}` : ''}`),
+      p ? h('span', { class: 'name ellipsis' }, p.name, entryTag(p) ? h('span', { class: 'small' }, `  ${entryTag(p)}`) : null) : h('span', {}, open ? '+ Scegli un giocatore' : '—'));
   });
+  for (const p of orphans) cards.push(h('div', { class: 'slot' }, h('span', { class: 'small tag-out' }, 'Torneo non più disponibile'), h('span', { class: 'name ellipsis' }, p.name)));
 
   return h('div', { class: 'page' },
     h('div', { class: 'hero' },
@@ -221,13 +225,13 @@ function viewTeam() {
       h('button', { class: 'link', onClick: openRules }, 'Regole')),
     st.captainOnlyNotice && h('div', { class: 'notice' }, h('b', {}, 'Stai segnando solo con il capitano. '),
       `Ti sei iscritto a finestra chiusa: la rosa si potrà comporre dalla prossima apertura${st.window.nextOpens ? ` (${fmtDateTime(st.window.nextOpens)})` : ''}.`), // RG-11
-    !st.hasRanking && h('div', { class: 'notice' }, 'Ranking non ancora disponibile: i giocatori compariranno dopo il primo import.'),
-    cap && h('div', { class: 'card captain' },
+        cap && h('div', { class: 'card captain' },
       h('div', { class: 'row spread' }, h('span', { class: 'badge' }, 'Capitano ×2'), h('span', { class: 'small' }, 'fisso per la stagione')),
       h('div', { style: 'font-weight:700;font-size:18px;margin-top:6px' }, cap.name),
       h('div', { class: 'small' }, [cap.pos ? `#${cap.pos}` : 'fuori dal ranking', cap.country].filter(Boolean).join(' · '))),
-    h('div', { class: 'row spread', style: 'margin:4px 2px 8px' }, h('h3', {}, 'Rosa'), h('span', { class: 'muted' }, `${roster.length}/${ROSTER_SIZE}`)),
-    h('div', { class: 'grid' }, slots),
+    h('div', { class: 'row spread', style: 'margin:4px 2px 8px' }, h('h3', {}, 'Rosa'), h('span', { class: 'muted' }, `${roster.length}/${tournaments.length} tornei`)),
+    tournaments.length === 0 && h('p', { class: 'muted center' }, 'I tornei di questa settimana non sono ancora disponibili.'),
+    h('div', { class: 'cards' }, cards),
     !open && roster.length === 0 && h('p', { class: 'muted center' }, 'Nessuna rosa per questa settimana.'),
     st.points.history.length > 0 && h('div', { class: 'card', style: 'margin-top:14px' }, h('h3', { style: 'margin-bottom:6px' }, 'Punti per settimana'),
       ...st.points.history.map((x) => h('div', { class: 'row spread', style: 'padding:4px 0' }, h('span', {}, `Settimana del ${fmtDay(x.weekStart)}`), h('b', {}, `+${x.points}`)))),

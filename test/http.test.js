@@ -41,14 +41,18 @@ test('API HTTP: auth, iscrizione, rosa, classifica, admin', async () => {
     assert.equal(r.body.user.teamName, 'u1'); // RL-24
     assert.equal(r.body.captain.id, 'p450');
 
-    r = await call('/api/roster', { user: 1, method: 'PUT', body: { playerIds: ['p20', 'p500'] } });
+    r = await call('/api/players?mode=roster', { user: 1 });
+    assert.equal(r.status, 200);
+    const [t1, t2] = r.body.tournaments;
+    const pick = (t, i) => t.participants.filter((p) => !['p450', 'p451'].includes(p.playerId))[i].playerId;
+    r = await call('/api/roster', { user: 1, method: 'PUT', body: { playerIds: [pick(t1, 0), pick(t2, 0)] } });
     assert.equal(r.status, 200);
     assert.equal(r.body.roster.players.length, 2);
     // RT-21: ogni utente scrive solo la propria rosa (nessun parametro userId accettato)
     await call('/api/register', { user: 2, method: 'POST', body: { captainId: 'p451' } });
-    await call('/api/roster', { user: 2, method: 'PUT', body: { playerIds: ['p600'], userId: 1 } });
-    assert.deepEqual((await call('/api/state', { user: 1 })).body.roster.playerIds, ['p20', 'p500']);
-    assert.equal((await call('/api/roster', { user: 1, method: 'PUT', body: { playerIds: ['p20', 'p21'] } })).status, 422); // due top-125
+    await call('/api/roster', { user: 2, method: 'PUT', body: { playerIds: [pick(t1, 1)], userId: 1 } });
+    assert.deepEqual((await call('/api/state', { user: 1 })).body.roster.playerIds, [pick(t1, 0), pick(t2, 0)]);
+    assert.equal((await call('/api/roster', { user: 1, method: 'PUT', body: { playerIds: [pick(t1, 0), pick(t1, 1)] } })).status, 422); // due dello stesso torneo
 
     r = await call('/api/league', { user: 1 });
     assert.ok(r.body.rows.length >= 10);

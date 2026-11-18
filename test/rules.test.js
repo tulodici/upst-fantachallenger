@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canAdd, validateRoster, pointsFor, withPositions, tierOf, isCaptainEligible } from '../shared/rules.js';
+import { canAdd, validatePicks, pointsFor, withPositions, tierOf, isCaptainEligible } from '../shared/rules.js';
 import { mondayOf, romeToUtc, windowOf, windowState, dayOfWeekOf } from '../src/time.js';
 import { validateInitData, signInitData, teamNameFor } from '../src/telegramAuth.js';
 
@@ -17,16 +17,19 @@ test('RL-11: vincoli top-125 / top-200', () => {
   assert.equal(canAdd([150, 160, 170], 50).code, 'TOP200_LIMIT'); // il top-125 conta nei top-200
   assert.equal(canAdd([150, 160, 170], 500).ok, true);
   assert.equal(canAdd([], 901).code, 'NOT_IN_POOL');
-  assert.equal(canAdd([300, 301, 302, 303, 304, 305, 306], 400).code, 'FULL');
 });
 
-test('validazione server della rosa', () => {
-  const ok = validateRoster([{ id: 'a', pos: 100 }, { id: 'b', pos: 190 }, { id: 'c', pos: 199 }, { id: 'd', pos: 500 }]);
-  assert.equal(ok.ok, true);
-  assert.equal(validateRoster([{ id: 'a', pos: 100 }, { id: 'a', pos: 100 }]).ok, false);
-  assert.equal(validateRoster([{ id: 'a', pos: null }]).errors[0].code, 'NOT_IN_POOL');
-  assert.equal(validateRoster([{ id: 'a', pos: 300 }], { captainId: 'a' }).errors[0].code, 'IS_CAPTAIN');
-  assert.equal(validateRoster(Array.from({ length: 8 }, (_, i) => ({ id: `p${i}`, pos: 300 + i }))).errors[0].code, 'TOO_MANY');
+test('validazione della rosa per torneo', () => {
+  const tournaments = [{ id: 't1', playerIds: ['a', 'b', 'c'] }, { id: 't2', playerIds: ['d', 'e'] }];
+  assert.equal(validatePicks(['a', 'd'], { tournaments }).ok, true);
+  assert.equal(validatePicks([], { tournaments }).ok, true); // anche rosa vuota
+  assert.equal(validatePicks(['a'], { tournaments }).ok, true); // meno giocatori dei tornei
+  assert.equal(validatePicks(['a', 'b'], { tournaments }).errors[0].code, 'ONE_PER_TOURNAMENT');
+  assert.equal(validatePicks(['a', 'a'], { tournaments }).errors[0].code, 'DUPLICATE');
+  assert.equal(validatePicks(['z'], { tournaments }).errors[0].code, 'NOT_A_PARTICIPANT');
+  assert.equal(validatePicks(['a'], { tournaments, captainId: 'a' }).errors[0].code, 'IS_CAPTAIN');
+  // nessun vincolo di classifica: la validazione non conosce le posizioni
+  assert.equal(validatePicks(['a', 'd'], { tournaments }).ok, true);
 });
 
 test('RL-04: capitano tra 201 e 900', () => {
