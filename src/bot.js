@@ -21,12 +21,12 @@ export function createBot({ token, adminIds = [], appUrl, log = console }) {
     }
   }
 
-  async function sendDocument(chatId, filename, content, caption) {
-    if (!token) { log.info?.(`[bot:dry-run] sendDocument ${filename} (${content.length} caratteri)`); return true; }
+  async function sendDocument(chatId, filename, content, caption, mime = 'application/octet-stream') {
+    if (!token) { log.info?.(`[bot:dry-run] sendDocument ${filename} (${content.length} byte)`); return true; }
     const form = new FormData();
     form.append('chat_id', String(chatId));
     if (caption) form.append('caption', caption);
-    form.append('document', new Blob([content], { type: 'text/csv' }), filename);
+    form.append('document', new Blob([content], { type: mime }), filename);
     try {
       const res = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, { method: 'POST', body: form, signal: AbortSignal.timeout(30000) });
       return Boolean((await res.json()).ok);
@@ -69,7 +69,8 @@ export function createBot({ token, adminIds = [], appUrl, log = console }) {
       const r = await core.adminPicksReport();
       await core.audit(from, 'bot:scelte', { rows: r.rows });
       const day = new Date().toISOString().slice(0, 10);
-      const ok = await sendDocument(chatId, `scelte-${day}.csv`, r.csv, `Scelte e punti di tutti, settimana per settimana (${r.rows} righe)`);
+      const ok = await sendDocument(chatId, `UPST-FantaChallenger-${day}.xlsx`, r.xlsx, `Scelte e punti di ${r.rows} squadre su ${r.tournaments} tornei`,
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       return ok ? undefined : sendMessage(chatId, '❌ Invio del file non riuscito, riprova.');
     }
     if (cmd === '/ricalcola') {

@@ -3,6 +3,7 @@ import {
 } from '../shared/rules.js';
 import { addDays, dayOfWeekOf, mondayOf, romeParts, romeToUtc, windowOf, windowState } from './time.js';
 import { QuotaExhaustedError } from './apiClient.js';
+import { buildXlsx, colName, STYLE } from './xlsx.js';
 
 export class AppError extends Error {
   constructor(code, message, status = 400, extra = {}) {
@@ -259,55 +260,123 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
   }
 
   /**
-   * Report admin: scelte di tutti, settimana per settimana, con i punti. CSV pronto per Excel (separatore ";", BOM UTF-8).
-   * Una riga per scelta, una per il capitano e un totale per squadra e settimana.
+   * Report admin (comando /scelte): cartella XLSX con la stessa struttura del foglio di gioco UPST.
+   *  MAIN            una colonna per torneo (raggruppati per settimana), sotto l'esito (SF, SF, F, W) e una riga per squadra
+   *                  con totale, capitano e giocatore scelto in ogni torneo.
+   *  RANKING         classifica con pari merito.
+   *  Detailed_Scores punti di ogni squadra in ogni torneo (scelta + capitano x2), totale e posizione.
    */
   async function adminPicksReport() {
-    const users = await db.all('SELECT id, telegram_id, team_name, captain_id, reg_week FROM users ORDER BY team_name, id');
-    const rosters = await db.all('SELECT user_id, week_start, player_ids, status FROM rosters ORDER BY week_start, user_id');
-    const tournaments = await db.all('SELECT id, name, week_start, status FROM tournaments');
+    const users = await db.all('SELECT id, telegram_id, team_name, captain_id, reg_week FROM users');
+    users.sort((x, y) => x.team_name.localeCompare(y.team_name, 'it', { sensitivity: 'base' }) || x.id - y.id);
+    const rosters = await db.all('SELECT user_id, week_start, player_ids FROM rosters');
+    const tournaments = (await db.all(`SELECT id, name, week_start, status FROM tournaments WHERE status <> 'cancelled'`))
+      .sort((x, y) => x.week_start.localeCompare(y.week_start) || x.name.localeCompare(y.name));
     const draws = await db.all('SELECT tournament_id, player_id FROM draw_entries');
     const results = await db.all('SELECT tournament_id, player_id, reached FROM tournament_results');
-    const players = new Map((await db.all('SELECT id, name FROM players')).map((p) => [p.id, p.name]));
-    const tById = new Map(tournaments.map((t) => [t.id, t]));
-    const inDraw = new Map(); // `${tournament}|${player}`
-    for (const d of draws) inDraw.set(`${d.tournament_id}|${d.player_id}`, true);
+    const players = new Map((await db.all('SELECT id, name FROM players')).map((q) => [q.id, q.name]));
+    const nameOf = (id) => players.get(id) ?? `Giocatore ${id}`;
+    const inDraw = new Set(draws.map((d) => `${d.tournament_id}|${d.player_id}`));
     const resultOf = new Map(results.map((r) => [`${r.tournament_id}|${r.player_id}`, r.reached]));
-    const ROUND_IT = { winner: 'Vincitore', finalist: 'Finalista', semifinalist: 'Semifinalista' };
+    const byTournament = (id, reached) => results.filter((r) => r.tournament_id === id && r.reached === reached).map((r) => nameOf(r.player_id));
 
-    // torneo della settimana in cui il giocatore partecipa / ha un risultato
-    const locate = (weekStart, playerId) => {
-      const ts = tournaments.filter((t) => t.week_start === weekStart);
-      const t = ts.find((x) => resultOf.has(`${x.id}|${playerId}`)) ?? ts.find((x) => inDraw.has(`${x.id}|${playerId}`));
-      if (!t) return { tournament: '—', reached: null, closed: false };
-      return { tournament: t.name, reached: resultOf.get(`${t.id}|${playerId}`) ?? null, closed: t.status === 'concluded' };
+    const isoWeek = (d) => {
+      const t = new Date(`${d}T00:00:00Z`);
+      t.setUTCDate(t.getUTCDate() + 3 - ((t.getUTCDay() + 6) % 7));
+      const y1 = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+      return 1 + Math.round(((t - y1) / 86400000 - 3 + ((y1.getUTCDay() + 6) % 7)) / 7);
     };
-    const line = (week, u, type, playerId, isCaptain) => {
-      const loc = locate(week, playerId);
-      const points = loc.reached ? pointsFor(loc.reached, isCaptain) : 0;
-      const outcome = loc.reached ? ROUND_IT[loc.reached] : loc.closed ? 'Fuori dal podio' : (loc.tournament === '—' ? 'Non in un torneo della settimana' : 'In corso / non concluso');
-      return [week, u.team_name, u.telegram_id, type, loc.tournament, players.get(playerId) ?? playerId, outcome, points];
+    const short = (n) => n.replace(/\s*\bchallenger\b\s*/i, ' ').replace(/\s+/g, ' ').trim() || n;
+    // torneo della settimana in cui il giocatore ha un risultato o partecipa
+    const locate = (week, playerId) => {
+      const ts = tournaments.filter((t) => t.week_start === week);
+      return ts.find((t) => resultOf.has(`${t.id}|${playerId}`)) ?? ts.find((t) => inDraw.has(`${t.id}|${playerId}`)) ?? null;
     };
 
-    const weeks = new Set(rosters.map((r) => r.week_start));
-    for (const t of tournaments) weeks.add(t.week_start);
-    const rows = [];
-    for (const week of [...weeks].sort()) {
-      for (const u of users) {
-        if (u.reg_week > week) continue; // non ancora iscritto
-        const r = rosters.find((x) => x.user_id === u.id && x.week_start === week);
-        const mine = (r ? JSON.parse(r.player_ids) : []).map((id) => line(week, u, 'Scelta', id, false));
-        const cap = line(week, u, 'Capitano', u.captain_id, true);
-        const all = [...mine, ...(cap[4] !== '—' ? [cap] : [])];
-        if (!r && all.length === 0) continue;
-        rows.push(...all);
-        rows.push([week, u.team_name, u.telegram_id, 'Totale', '', '', '', all.reduce((n, x) => n + x[7], 0)]);
+    const FIRST = 3; // colonne A, B, C; i tornei partono da D
+    const colOf = new Map(tournaments.map((t, i) => [t.id, FIRST + i]));
+    const lastCol = FIRST + Math.max(tournaments.length, 1) - 1;
+    const lastLetter = colName(lastCol);
+    const START = 8; // prima riga squadre (1-based), come nel foglio di riferimento
+
+    // Punti e scelte per squadra
+    const table = users.map((u) => {
+      const picks = new Map(); // tournamentId -> playerId
+      const pts = new Map(); // tournamentId -> punti
+      for (const r of rosters.filter((x) => x.user_id === u.id)) {
+        for (const id of JSON.parse(r.player_ids)) {
+          const t = locate(r.week_start, id);
+          if (!t) continue;
+          picks.set(t.id, id);
+          const reached = resultOf.get(`${t.id}|${id}`);
+          pts.set(t.id, (pts.get(t.id) ?? 0) + (reached ? pointsFor(reached, false) : 0));
+        }
       }
-    }
-    const header = ['Settimana', 'Squadra', 'Telegram ID', 'Tipo', 'Torneo', 'Giocatore', 'Risultato', 'Punti'];
-    const esc = (v) => { const t = String(v ?? ''); return /[";\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
-    const csv = '\ufeff' + [header, ...rows].map((r) => r.map(esc).join(';')).join('\r\n') + '\r\n';
-    return { rows: rows.length, csv };
+      for (const t of tournaments) { // capitano: dal suo settimana d'iscrizione, anche senza rosa
+        const reached = resultOf.get(`${t.id}|${u.captain_id}`);
+        if (reached && u.reg_week <= t.week_start) pts.set(t.id, (pts.get(t.id) ?? 0) + pointsFor(reached, true));
+      }
+      const total = [...pts.values()].reduce((n, x) => n + x, 0);
+      return { u, picks, pts, total };
+    });
+    const ranked = [...table].sort((x, y) => y.total - x.total);
+    const posOf = new Map();
+    ranked.forEach((x, i) => posOf.set(x.u.id, i > 0 && ranked[i - 1].total === x.total ? posOf.get(ranked[i - 1].u.id) : i + 1));
+
+    const head = (ref) => [
+      ['UPST', null, null, ...tournaments.map((t) => ({ v: `WEEK ${isoWeek(t.week_start)}`, s: STYLE.header }))],
+      ['FantaChallenger', null, ref, ...tournaments.map((t) => ({ v: short(t.name), s: STYLE.tournament }))],
+    ];
+    const rowOfUser = (i) => START + i;
+
+    // MAIN
+    const main = head({ v: 'Capitano', s: STYLE.header });
+    main[0][0] = { v: 'UPST', s: STYLE.bold };
+    main[1][0] = { v: 'FantaChallenger', s: STYLE.bold };
+    const legend = [['SF', 2, '- Un giocatore per torneo'], ['SF', 2, '- Non sostituibile: il capitano'], ['F', 5, '- Capitano dal 201° al 900° del ranking'], ['W', 10, '- Moltiplicatore punti x2']];
+    const reachedRows = [['semifinalist', 0], ['semifinalist', 1], ['finalist', 0], ['winner', 0]];
+    legend.forEach(([code, points, note], i) => {
+      main.push([{ v: code, s: STYLE.center }, { v: points, s: STYLE.center }, note,
+        ...tournaments.map((t) => { const who = byTournament(t.id, reachedRows[i][0])[reachedRows[i][1]]; return who ? { v: who, s: STYLE.result } : { v: '', s: STYLE.result }; })]);
+    });
+    main.push([]);
+    table.forEach(({ u, picks }, i) => {
+      const r = rowOfUser(i);
+      main.push([
+        { v: u.team_name, s: STYLE.bold },
+        { v: table[i].total, f: `Detailed_Scores!B${r}`, s: STYLE.center },
+        { v: nameOf(u.captain_id), s: STYLE.captain },
+        ...tournaments.map((t) => ({ v: picks.has(t.id) ? nameOf(picks.get(t.id)) : '', s: STYLE.pick })),
+      ]);
+    });
+
+    // Detailed_Scores
+    const detailed = head({ v: 'Rank', s: STYLE.header });
+    detailed.forEach((row, ri) => row.forEach((c, ci) => { if (ci >= FIRST) row[ci] = { v: c.v, f: `MAIN!${colName(ci)}${ri + 1}`, s: c.s }; }));
+    for (let i = 0; i < 6; i++) detailed.push([]);
+    detailed.length = START - 1; // righe 3-7 vuote
+    table.forEach(({ u, pts, total }, i) => {
+      const r = rowOfUser(i);
+      detailed.push([
+        { v: u.team_name, f: `MAIN!A${r}`, s: STYLE.bold },
+        { v: total, f: `SUM(D${r}:${lastLetter}${r})`, s: STYLE.center },
+        { v: posOf.get(u.id), f: `RANK(B${r},$B$${START}:$B$${START + users.length - 1},FALSE)`, s: STYLE.center },
+        ...tournaments.map((t) => ({ v: pts.has(t.id) ? pts.get(t.id) : '', s: STYLE.center })),
+      ]);
+    });
+
+    // RANKING
+    const ranking = [[{ v: 'RANKING', s: STYLE.bold }], [{ v: 'Pos.', s: STYLE.header }, { v: 'Squadra', s: STYLE.header }, { v: 'Capitano', s: STYLE.header }, { v: 'Punti', s: STYLE.header }]];
+    for (const x of ranked) ranking.push([{ v: posOf.get(x.u.id), s: STYLE.center }, { v: x.u.team_name, s: STYLE.bold }, { v: nameOf(x.u.captain_id), s: STYLE.captain }, { v: x.total, s: STYLE.center }]);
+
+    const widths = { 0: 24, 1: 8, 2: 30 };
+    for (let i = FIRST; i <= lastCol; i++) widths[i] = 18;
+    const xlsx = buildXlsx([
+      { name: 'MAIN', rows: main, widths, freeze: { col: FIRST, row: START - 1 } },
+      { name: 'RANKING', rows: ranking, widths: { 0: 7, 1: 26, 2: 28, 3: 9 }, freeze: { col: 0, row: 2 } },
+      { name: 'Detailed_Scores', rows: detailed, widths: { ...widths, 2: 8 }, freeze: { col: FIRST, row: START - 1 } },
+    ]);
+    return { rows: users.length, tournaments: tournaments.length, xlsx };
   }
 
   async function myPoints(user) {
