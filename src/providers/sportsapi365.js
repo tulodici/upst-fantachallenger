@@ -94,6 +94,42 @@ export function drawParticipants(draw) {
   return [...out.values()];
 }
 
+const ROUND_LABELS = { 9: 'Quarti di finale', 10: 'Semifinali', 12: 'Finale' };
+const COUNT_LABELS = { 1: 'Finale', 2: 'Semifinali', 4: 'Quarti di finale', 8: 'Ottavi di finale', 16: 'Sedicesimi di finale' };
+const slot = (p) => {
+  if (!p || typeof p !== 'object' || !p.name) return { id: null, name: null };
+  const up = String(p.name).toUpperCase();
+  if (up === 'BYE') return { id: null, name: 'BYE' };
+  if (up === 'TBA') return { id: null, name: null };
+  return { id: p.id == null ? null : String(p.id), name: String(p.name), country: p.countryAcr ?? null, seed: p.seed ?? null };
+};
+
+/**
+ * Struttura reale del tabellone principale: turni (dal piu' lontano alla finale) con le partite nell'ordine dell'API.
+ * Etichetta: id turno noto (9/10/12) oppure dal numero di partite del turno; altrimenti "Turno n".
+ */
+export function buildBracket(draw) {
+  const byRound = new Map();
+  for (const m of draw?.singles ?? []) {
+    if (m.roundId == null) continue;
+    if (!byRound.has(m.roundId)) byRound.set(m.roundId, []);
+    byRound.get(m.roundId).push(m);
+  }
+  const ids = [...byRound.keys()].sort((a, b) => a - b);
+  return ids.map((roundId, i) => {
+    const ms = byRound.get(roundId);
+    return {
+      roundId,
+      label: ROUND_LABELS[roundId] ?? COUNT_LABELS[ms.length] ?? `Turno ${i + 1}`,
+      matches: ms.map((m) => {
+        const winnerId = m.winnerId ?? m.winner_id ?? null;
+        const done = Boolean(m.result && !m.tbd);
+        return { p1: slot(m.player1), p2: slot(m.player2), winnerId: done && winnerId != null ? String(winnerId) : null, score: done ? String(m.result) : null };
+      }),
+    };
+  });
+}
+
 /**
  * Esito dal tabellone: vincitore e finalista dalla finale (con winnerId), semifinalisti = perdenti delle semifinali.
  * Se qualcosa non torna (finale non giocata, semifinalisti != 2) il torneo resta "in_progress" con un'anomalia.
@@ -146,7 +182,7 @@ export const sportsApi365Provider = {
     for (const t of await fetchCalendar(weekStart, api)) {
       try {
         const draw = await fetchDraw(t, year, api);
-        out.push({ ...t, weekStart, status: 'scheduled', draw: drawParticipants(draw) });
+        out.push({ ...t, weekStart, status: 'scheduled', draw: drawParticipants(draw), bracket: buildBracket(draw) });
       } catch (e) {
         if (e.name === 'QuotaExhaustedError') throw e;
         out.push({ ...t, weekStart, status: 'scheduled', draw: [] }); // il torneo compare comunque, senza tabellone
@@ -162,7 +198,7 @@ export const sportsApi365Provider = {
     const out = [];
     for (const t of targets) {
       const draw = await fetchDraw(t, year, api);
-      out.push({ tournamentId: String(t.id), name: t.name, location: t.location ?? null, ...extractResults(draw) });
+      out.push({ tournamentId: String(t.id), name: t.name, location: t.location ?? null, ...extractResults(draw), bracket: buildBracket(draw) });
     }
     return out;
   },

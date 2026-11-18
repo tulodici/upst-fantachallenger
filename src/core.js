@@ -328,6 +328,11 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     const ts = await tournamentsWithPeople(`week_start = ? AND status <> 'concluded'`, [wk]);
     const done = await tournamentsWithPeople(`week_start = ? AND status = 'concluded'`, [wk]);
     const all = [...ts, ...done];
+    const rows = all.length
+      ? await db.all(`SELECT tournament_id, data FROM tournament_brackets WHERE tournament_id IN (${all.map(() => '?').join(',')})`, all.map((t) => t.id))
+      : [];
+    const brackets = new Map(rows.map((r) => [r.tournament_id, JSON.parse(r.data)]));
+    for (const t of all) t.bracket = brackets.get(t.id) ?? null;
     const last = all.map((t) => t.updatedAt).sort().at(-1) ?? null;
     return { weekStart: wk, updatedAt: last, tournaments: all };
   }
@@ -370,6 +375,16 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     );
   }
 
+  /** Struttura del tabellone (turni e partite) come da provider; non sovrascrive con un tabellone vuoto. */
+  async function saveBracket(t, tournamentId, bracket) {
+    if (!Array.isArray(bracket) || bracket.every((r) => !r.matches?.length)) return;
+    await t.run(
+      `INSERT INTO tournament_brackets (tournament_id, data, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT (tournament_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
+      [tournamentId, JSON.stringify(bracket), iso()],
+    );
+  }
+
   async function importDraws(weekStart) {
     const tournaments = await provider.fetchWeekDraws(weekStart, api);
     await db.tx(async (t) => {
@@ -379,6 +394,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
            ON CONFLICT (id) DO UPDATE SET name = excluded.name, location = excluded.location, updated_at = excluded.updated_at`,
           [tr.id, tr.name, weekStart, tr.location ?? null, iso()],
         );
+        await saveBracket(t, tr.id, tr.bracket);
         await t.run('DELETE FROM draw_entries WHERE tournament_id = ?', [tr.id]);
         for (const p of tr.draw) {
           await upsertPlayer(t, p);
@@ -410,6 +426,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
            ON CONFLICT (id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at`,
           [r.tournamentId, r.name ?? nameOf.get(r.tournamentId) ?? `Torneo ${r.tournamentId}`, weekStart, r.status, r.location ?? null, iso()],
         );
+        await saveBracket(t, r.tournamentId, r.bracket);
         if (r.status === 'concluded') {
           await t.run('DELETE FROM tournament_results WHERE tournament_id = ?', [r.tournamentId]);
           for (const x of r.results) {

@@ -27,6 +27,9 @@ const SCHEMA = [
     PRIMARY KEY (tournament_id, player_id)
   )`,
   `CREATE INDEX IF NOT EXISTS idx_draw_player ON draw_entries (player_id)`,
+  `CREATE TABLE IF NOT EXISTS tournament_brackets (
+    tournament_id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS tournament_results (
     tournament_id TEXT NOT NULL, player_id TEXT NOT NULL, reached TEXT NOT NULL,
     PRIMARY KEY (tournament_id, player_id)

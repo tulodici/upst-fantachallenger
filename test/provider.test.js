@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sportsApi365Provider, extractResults, drawParticipants, filterChallengers, weekOfStart } from '../src/providers/sportsapi365.js';
+import { buildBracket, sportsApi365Provider, extractResults, drawParticipants, filterChallengers, weekOfStart } from '../src/providers/sportsapi365.js';
 import { makeCore } from './helpers.js';
 import { createMockProvider } from '../src/providers/mock.js';
 import { romeToUtc } from '../src/time.js';
@@ -172,4 +172,29 @@ test('pulizia dati finti anche se il marcatore dice "reale" (vecchio container c
   assert.deepEqual(await core2.reconcileProvider(), { purged: true });
   assert.equal((await h.db.get('SELECT COUNT(*) AS n FROM players')).n, 0);
   assert.deepEqual(await core2.reconcileProvider(), { purged: false }); // seconda volta: niente da pulire
+});
+
+test('struttura del tabellone: turni ordinati, etichette, vincitori e giocatori da definire', () => {
+  const d = fullDraw();
+  d.singles[6] = { roundId: 12, player1: P(1), player2: { id: null, name: 'TBA' }, result: null, tbd: true };
+  const b = buildBracket(d);
+  assert.deepEqual(b.map((r) => [r.label, r.matches.length]), [['Quarti di finale', 4], ['Semifinali', 2], ['Finale', 1]]);
+  assert.equal(b[0].matches[0].winnerId, '1');
+  assert.equal(b[0].matches[0].score, '6-3 6-4');
+  assert.equal(b[2].matches[0].p2.name, null);
+  assert.equal(b[2].matches[0].winnerId, null);
+});
+
+test('import dei draw salva il tabellone e lo espone tra i tornei in corso', async () => {
+  const provider = {
+    ...createMockProvider(),
+    fetchWeekDraws: async (weekStart) => [{ id: 't1', name: 'Challenger Test', weekStart, status: 'scheduled', location: 'ITA', draw: drawParticipants(fullDraw()), bracket: buildBracket(fullDraw()) }],
+  };
+  const { core, at } = await makeCore({ provider });
+  at('2026-11-23', 10);
+  await core.importDraws('2026-11-23');
+  const r = await core.inProgressTournaments();
+  const t = r.tournaments.find((x) => x.id === 't1');
+  assert.equal(t.bracket.length, 3);
+  assert.equal(t.bracket[2].label, 'Finale');
 });

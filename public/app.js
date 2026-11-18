@@ -245,6 +245,19 @@ function drawBlock(t) {
   return h('details', {}, h('summary', {}, `Tabellone (${main.length}${qual.length ? ` + ${qual.length} qualificati` : ''})`),
     h('div', { class: 'draw' }, ...main.map((d) => h('div', {}, d.name)), ...qual.map((d) => h('div', { class: 'muted' }, `${d.name} (Q)`))));
 }
+function sideRow(p, m) {
+  const decided = m.winnerId != null;
+  const cls = !p.name ? 'tba' : decided ? (p.id === m.winnerId ? 'win' : 'lose') : '';
+  return h('div', { class: `side ${cls}` }, h('span', { class: 'nm' }, p.name ?? 'Da definire'), p.seed ? h('span', { class: 'small' }, `[${p.seed}]`) : null);
+}
+function bracketBlock(t) {
+  if (!t.bracket?.length) return null;
+  return h('details', { open: true }, h('summary', {}, 'Tabellone'),
+    h('div', { class: 'bracket' }, ...t.bracket.flatMap((r) => [
+      h('div', { class: 'round-title' }, r.label),
+      ...r.matches.map((m) => h('div', { class: 'match' }, sideRow(m.p1, m), sideRow(m.p2, m), m.score ? h('div', { class: 'score' }, m.score) : null)),
+    ])));
+}
 function tournamentCard(t, { stars = false } = {}) {
   const order = ['winner', 'finalist', 'semifinalist'];
   const res = [...(t.results ?? [])].sort((a, b) => order.indexOf(a.reached) - order.indexOf(b.reached));
@@ -252,7 +265,7 @@ function tournamentCard(t, { stars = false } = {}) {
     h('div', { class: 'row spread' }, h('b', {}, t.name), t.status ? h('span', { class: 'small' }, statusLabel[t.status] ?? t.status) : null),
     t.location ? h('div', { class: 'small' }, t.location) : null,
     res.length ? h('div', { class: 'podium' }, ...res.map((r) => h('div', {}, `${ROUND[r.reached][0]} ${r.name}`, r.starred ? ' ⭐' : ''))) : null,
-    drawBlock(t));
+    bracketBlock(t) ?? drawBlock(t));
 }
 
 function viewTournaments() {

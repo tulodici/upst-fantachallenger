@@ -106,3 +106,15 @@ ul.rules { padding-left: 18px; margin: 8px 0; } ul.rules li { margin: 6px 0; }
 
 .slot .row { min-width: 0; }
 .slot .row .small { min-width: 0; }
+
+/* tabellone con turni e partite */
+.bracket { margin-top: 8px; }
+.round-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--hint); margin: 12px 0 6px; }
+.match { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 6px; overflow: hidden; font-size: 14px; }
+.match .side { display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px; min-width: 0; }
+.match .side + .side { border-top: 1px solid var(--border); }
+.match .side span.nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.match .side.win { font-weight: 700; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.match .side.lose { color: var(--hint); }
+.match .side.tba { color: var(--hint); font-style: italic; }
+.match .score { padding: 3px 10px; font-size: 12px; color: var(--hint); border-top: 1px dashed var(--border); font-variant-numeric: tabular-nums; }
