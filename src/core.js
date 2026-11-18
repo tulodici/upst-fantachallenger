@@ -303,12 +303,14 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     const table = users.map((u) => {
       const picks = new Map(); // tournamentId -> playerId
       const pts = new Map(); // tournamentId -> punti
+      const medal = new Map(); // tournamentId -> risultato raggiunto dal giocatore scelto (per i colori)
       for (const r of rosters.filter((x) => x.user_id === u.id)) {
         for (const id of JSON.parse(r.player_ids)) {
           const t = locate(r.week_start, id);
           if (!t) continue;
           picks.set(t.id, id);
           const reached = resultOf.get(`${t.id}|${id}`);
+          if (reached) medal.set(t.id, reached);
           pts.set(t.id, (pts.get(t.id) ?? 0) + (reached ? pointsFor(reached, false) : 0));
         }
       }
@@ -317,7 +319,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
         if (reached && u.reg_week <= t.week_start) pts.set(t.id, (pts.get(t.id) ?? 0) + pointsFor(reached, true));
       }
       const total = [...pts.values()].reduce((n, x) => n + x, 0);
-      return { u, picks, pts, total };
+      return { u, picks, pts, medal, total };
     });
     const ranked = [...table].sort((x, y) => y.total - x.total);
     const posOf = new Map();
@@ -328,25 +330,28 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
       ['FantaChallenger', null, ref, ...tournaments.map((t) => ({ v: short(t.name), s: STYLE.tournament }))],
     ];
     const rowOfUser = (i) => START + i;
+    // oro = vincitore, argento = finalista, bronzo = semifinalista; chi non ha punti resta bianco
+    const MEDAL = { winner: ['gold', 'goldC'], finalist: ['silver', 'silverC'], semifinalist: ['bronze', 'bronzeC'] };
+    const medalStyle = (reached, centered) => STYLE[MEDAL[reached]?.[centered ? 1 : 0] ?? (centered ? 'whiteC' : 'pick')];
 
     // MAIN
     const main = head({ v: 'Capitano', s: STYLE.header });
     main[0][0] = { v: 'UPST', s: STYLE.bold };
     main[1][0] = { v: 'FantaChallenger', s: STYLE.bold };
-    const legend = [['SF', 2, '- Un giocatore per torneo'], ['SF', 2, '- Non sostituibile: il capitano'], ['F', 5, '- Capitano dal 201° al 900° del ranking'], ['W', 10, '- Moltiplicatore punti x2']];
+    const legend = [['SF', 2, '- Un giocatore per torneo'], ['SF', 2, '- Non sostituibile: il capitano'], ['F', 5, '- Capitano dal 201° al 900° del ranking'], ['W', 10, '- Moltiplicatore punti x2 (capitano in verde)']];
     const reachedRows = [['semifinalist', 0], ['semifinalist', 1], ['finalist', 0], ['winner', 0]];
     legend.forEach(([code, points, note], i) => {
       main.push([{ v: code, s: STYLE.center }, { v: points, s: STYLE.center }, note,
-        ...tournaments.map((t) => { const who = byTournament(t.id, reachedRows[i][0])[reachedRows[i][1]]; return who ? { v: who, s: STYLE.result } : { v: '', s: STYLE.result }; })]);
+        ...tournaments.map((t) => { const who = byTournament(t.id, reachedRows[i][0])[reachedRows[i][1]]; return { v: who ?? '', s: medalStyle(reachedRows[i][0], false) }; })]);
     });
     main.push([]);
-    table.forEach(({ u, picks }, i) => {
+    table.forEach(({ u, picks, medal }, i) => {
       const r = rowOfUser(i);
       main.push([
         { v: u.team_name, s: STYLE.bold },
         { v: table[i].total, f: `Detailed_Scores!B${r}`, s: STYLE.center },
         { v: nameOf(u.captain_id), s: STYLE.captain },
-        ...tournaments.map((t) => ({ v: picks.has(t.id) ? nameOf(picks.get(t.id)) : '', s: STYLE.pick })),
+        ...tournaments.map((t) => ({ v: picks.has(t.id) ? nameOf(picks.get(t.id)) : '', s: medalStyle(medal.get(t.id), false) })),
       ]);
     });
 
@@ -355,13 +360,13 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     detailed.forEach((row, ri) => row.forEach((c, ci) => { if (ci >= FIRST) row[ci] = { v: c.v, f: `MAIN!${colName(ci)}${ri + 1}`, s: c.s }; }));
     for (let i = 0; i < 6; i++) detailed.push([]);
     detailed.length = START - 1; // righe 3-7 vuote
-    table.forEach(({ u, pts, total }, i) => {
+    table.forEach(({ u, pts, medal, total }, i) => {
       const r = rowOfUser(i);
       detailed.push([
         { v: u.team_name, f: `MAIN!A${r}`, s: STYLE.bold },
         { v: total, f: `SUM(D${r}:${lastLetter}${r})`, s: STYLE.center },
         { v: posOf.get(u.id), f: `RANK(B${r},$B$${START}:$B$${START + users.length - 1},FALSE)`, s: STYLE.center },
-        ...tournaments.map((t) => ({ v: pts.has(t.id) ? pts.get(t.id) : '', s: STYLE.center })),
+        ...tournaments.map((t) => ({ v: pts.has(t.id) ? pts.get(t.id) : '', s: medalStyle(medal.get(t.id), true) })),
       ]);
     });
 
@@ -369,7 +374,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     const ranking = [[{ v: 'RANKING', s: STYLE.bold }], [{ v: 'Pos.', s: STYLE.header }, { v: 'Squadra', s: STYLE.header }, { v: 'Capitano', s: STYLE.header }, { v: 'Punti', s: STYLE.header }]];
     for (const x of ranked) ranking.push([{ v: posOf.get(x.u.id), s: STYLE.center }, { v: x.u.team_name, s: STYLE.bold }, { v: nameOf(x.u.captain_id), s: STYLE.captain }, { v: x.total, s: STYLE.center }]);
 
-    const widths = { 0: 24, 1: 8, 2: 30 };
+    const widths = { 0: 24, 1: 8, 2: 42 };
     for (let i = FIRST; i <= lastCol; i++) widths[i] = 18;
     const xlsx = buildXlsx([
       { name: 'MAIN', rows: main, widths, freeze: { col: FIRST, row: START - 1 } },
