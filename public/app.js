@@ -242,8 +242,8 @@ function participantsBlock(t) {
   if (!t.participants?.length) return null;
   const tag = (p) => (p.seed != null ? `[${p.seed}]` : p.entry ?? '');
   return h('details', {}, h('summary', {}, `Partecipanti (${t.participants.length})`),
-    h('div', { class: 'draw' }, ...t.participants.map((p) => h('div', { class: p.seed == null && p.entry ? 'muted' : '' },
-      p.seed != null || p.entry ? h('span', { class: 'small', style: 'display:inline-block;min-width:34px' }, tag(p)) : h('span', { style: 'display:inline-block;min-width:34px' }), p.name))));
+    h('div', { class: 'draw' }, ...t.participants.map((p) => h('div', {},
+      p.seed != null || p.entry ? h('span', { style: 'display:inline-block;min-width:34px;font-weight:600' }, tag(p)) : h('span', { style: 'display:inline-block;min-width:34px' }), p.name))));
 }
 function tournamentCard(t, { stars = false } = {}) {
   const order = ['winner', 'finalist', 'semifinalist'];
