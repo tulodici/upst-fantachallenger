@@ -45,6 +45,11 @@ export function createBot({ token, adminIds = [], appUrl, log = console }) {
       const q = await core.adminStatus();
       return sendMessage(chatId, `Quota API ${q.quota.month}: ${q.quota.used}/${q.quota.limit} (restano ${q.quota.remaining}).`);
     }
+    if (cmd === '/stato') {
+      const q = await core.adminStatus();
+      const jobs = q.jobs.slice(0, 6).map((j) => `${j.job} ${j.run_key}: ${j.status}${j.status === 'done' ? '' : ' – ' + String(j.message).slice(0, 80)}`).join('\n');
+      return sendMessage(chatId, `Provider: ${q.provider}\nGiocatori: ${q.players} · Tornei: ${q.tournaments} · Iscritti: ${q.users}\nUltimo ranking: ${q.lastRankingWeek ?? '—'}\nQuota API: ${q.quota.used}/${q.quota.limit}\n\n${jobs || 'Nessun job eseguito'}`);
+    }
     if (cmd === '/ricalcola') {
       await core.recomputePoints();
       await core.audit(from, 'bot:ricalcola');

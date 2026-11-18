@@ -160,3 +160,16 @@ test('passaggio da dati finti a dati reali: elimina i dati demo, mai il contrari
   assert.equal(r.warning, true);
   assert.equal((await h.db.get('SELECT COUNT(*) AS n FROM players')).n, 1);
 });
+
+test('pulizia dati finti anche se il marcatore dice "reale" (vecchio container che rigenera dati demo)', async () => {
+  const h = await makeCore({ provider: createMockProvider() });
+  h.at('2026-11-16', 12, 30);
+  await h.core.runJob('ranking', '2026-11-16');
+  await h.db.run(`INSERT INTO meta (k, v) VALUES ('data_provider', 'sportsapi365')`); // marcatore gia' passato a "reale"
+  const real = { name: 'sportsapi365', fetchRankingPage: async () => ({ players: [], hasMore: false }), fetchWeekDraws: async () => [], fetchWeekResults: async () => [] };
+  const { createCore } = await import('../src/core.js');
+  const core2 = createCore({ db: h.db, provider: real, api: h.api, bot: { sendMessage: async () => true, notifyAdmins: async () => {} }, clock: () => romeToUtc('2026-11-18', 15), config: {} });
+  assert.deepEqual(await core2.reconcileProvider(), { purged: true });
+  assert.equal((await h.db.get('SELECT COUNT(*) AS n FROM players')).n, 0);
+  assert.deepEqual(await core2.reconcileProvider(), { purged: false }); // seconda volta: niente da pulire
+});

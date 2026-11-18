@@ -436,14 +436,13 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
    */
   async function reconcileProvider() {
     const meta = await db.get(`SELECT v FROM meta WHERE k = 'data_provider'`);
-    let stored = meta?.v;
-    if (!stored) {
-      const mockish = await db.get(`SELECT COUNT(*) AS n FROM players WHERE id LIKE 'p%'`);
-      stored = mockish.n > 0 ? 'mock' : null;
-    }
+    const mockish = (await db.get(`SELECT COUNT(*) AS n FROM players WHERE id LIKE 'p%'`)).n > 0; // id fittizi: p1, p2...
+    const stored = meta?.v ?? (mockish ? 'mock' : null);
     const current = provider.name;
     let purged = false;
-    if (stored === 'mock' && current !== 'mock') {
+    // Controlla i dati e non solo il marcatore: un vecchio container (provider mock) ancora attivo durante un deploy
+    // puo' rigenerare dati finti dopo una pulizia.
+    if (current !== 'mock' && (stored === 'mock' || mockish)) {
       await db.tx(async (t) => {
         for (const table of ['points', 'roster_snapshots', 'snapshot_weeks', 'rosters', 'tournament_results', 'draw_entries', 'tournaments', 'rankings', 'players', 'users', 'job_runs']) {
           await t.run(`DELETE FROM ${table}`);
@@ -451,6 +450,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
       });
       await audit('system', 'purge-mock-data', { from: 'mock', to: current });
       await bot.notifyAdmins('🧹 Passaggio ai dati reali: eliminati giocatori, tornei e iscritti di prova. Import del ranking in corso.');
+      console.log('[reconcile] dati fittizi eliminati, provider:', current);
       purged = true;
     } else if (stored && stored !== 'mock' && current === 'mock') {
       console.warn('ATTENZIONE: il DB contiene dati reali ma il provider attivo e\' MOCK (MOCK_API=1). Nessun dato modificato.');
@@ -544,11 +544,13 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     try {
       const out = await fn(key);
       await upsertJob(job, key, 'done', attempts, JSON.stringify(out ?? null));
+      console.log(`[job] ${job} ${key} ok`, JSON.stringify(out ?? null).slice(0, 300));
       await audit(actor, `job:${job}`, { key, out, force });
       return { ok: true, out };
     } catch (e) {
       const blocked = e instanceof QuotaExhaustedError;
       await upsertJob(job, key, blocked ? 'blocked' : 'failed', blocked ? MAX_JOB_ATTEMPTS : attempts, e.message);
+      console.error(`[job] ${job} ${key} FALLITO (tentativo ${attempts}): ${e.message}`);
       await audit(actor, `job-failed:${job}`, { key, error: e.message });
       if (blocked || attempts >= MAX_JOB_ATTEMPTS) {
         await bot.notifyAdmins(`❌ Job "${job}" (${key}) fallito: ${e.message}${blocked ? ' — usa il fallback manuale.' : ''}`);
@@ -611,6 +613,9 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
       jobs: await db.all('SELECT * FROM job_runs ORDER BY last_attempt_at DESC LIMIT 20'),
       users: (await db.get('SELECT COUNT(*) AS n FROM users')).n,
       lastRankingWeek: (await db.get('SELECT MAX(week_start) AS w FROM rankings')).w,
+      provider: provider.name,
+      players: (await db.get('SELECT COUNT(*) AS n FROM players')).n,
+      tournaments: (await db.get('SELECT COUNT(*) AS n FROM tournaments')).n,
     };
   }
 
