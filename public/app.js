@@ -248,7 +248,7 @@ function drawBlock(t) {
 function sideRow(p, m) {
   const decided = m.winnerId != null;
   const cls = !p.name ? 'tba' : decided ? (p.id === m.winnerId ? 'win' : 'lose') : '';
-  return h('div', { class: `side ${cls}` }, h('span', { class: 'nm' }, p.name ?? 'Da definire'), p.seed ? h('span', { class: 'small' }, `[${p.seed}]`) : null);
+  return h('div', { class: `side ${cls}` }, h('span', { class: 'nm' }, p.name ?? 'Da definire'), (p.seed || p.entry) ? h('span', { class: 'small' }, p.seed ? `[${p.seed}]` : p.entry) : null);
 }
 function bracketBlock(t) {
   if (!t.bracket?.length) return null;

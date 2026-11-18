@@ -101,7 +101,11 @@ const slot = (p) => {
   const up = String(p.name).toUpperCase();
   if (up === 'BYE') return { id: null, name: 'BYE' };
   if (up === 'TBA') return { id: null, name: null };
-  return { id: p.id == null ? null : String(p.id), name: String(p.name), country: p.countryAcr ?? null, seed: p.seed ?? null };
+  // `seed`: "1", "2"... = testa di serie; "q", "wc", "ll"... = tipo di ingresso (qualificato, wild card, lucky loser).
+  const raw = p.seed == null ? '' : String(p.seed).trim().toLowerCase();
+  const seed = /^\d+$/.test(raw) ? Number(raw) : null;
+  const entry = raw && seed == null ? raw.toUpperCase() : null;
+  return { id: p.id == null ? null : String(p.id), name: String(p.name), country: p.countryAcr ?? null, seed, entry };
 };
 
 /**

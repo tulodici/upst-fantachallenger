@@ -198,3 +198,10 @@ test('import dei draw salva il tabellone e lo espone tra i tornei in corso', asy
   assert.equal(t.bracket.length, 3);
   assert.equal(t.bracket[2].label, 'Finale');
 });
+
+test('teste di serie e tipo di ingresso dal tabellone', () => {
+  const d = { singles: [{ roundId: 4, result: '6-3 6-3', winnerId: 1, player1: { ...P(1), seed: '1' }, player2: { ...P(2), seed: 'q' } }] };
+  const m = buildBracket(d)[0].matches[0];
+  assert.equal(m.p1.seed, 1); assert.equal(m.p1.entry, null);
+  assert.equal(m.p2.seed, null); assert.equal(m.p2.entry, 'Q');
+});
