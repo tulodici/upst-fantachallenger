@@ -304,7 +304,7 @@ function viewLeague() {
 
 // ------------------------------------------------------------------ shell
 function tabbar() {
-  const tabs = [['team', '🎾', 'My Team'], ['tournaments', '🏟️', 'Tournaments'], ['league', '🏆', 'Classifica']];
+  const tabs = [['team', '🎾', 'Team'], ['tournaments', '🏟️', 'Tornei'], ['league', '🏆', 'Classifica']];
   return h('nav', { class: 'tabbar' }, ...tabs.map(([k, ico, label]) =>
     h('button', { class: S.tab === k ? 'on' : '', onClick: () => { S.tab = k; render(); window.scrollTo(0, 0); } }, h('span', { class: 'ico' }, ico), label)));
 }
