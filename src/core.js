@@ -315,15 +315,37 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
   async function completedTournaments(user) {
     const ts = await tournamentsWithPeople(`status = 'concluded'`, []);
     let starred = new Set();
+    const snapByWeek = new Map();
+    const names = new Map();
     if (user) {
       const snaps = await db.all('SELECT week_start, player_id FROM roster_snapshots WHERE user_id = ?', [user.id]);
       starred = new Set(snaps.map((s) => `${s.week_start}|${s.player_id}`));
+      for (const sn of snaps) { if (!snapByWeek.has(sn.week_start)) snapByWeek.set(sn.week_start, []); snapByWeek.get(sn.week_start).push(sn.player_id); }
+      const ids = [...new Set([...snaps.map((x) => x.player_id), user.captain_id])];
+      for (const r of await db.all(`SELECT id, name, country FROM players WHERE id IN (${ids.map(() => '?').join(',')})`, ids)) names.set(r.id, r);
     }
     const weeks = new Map();
     for (const t of ts) {
       const mark = (p) => ({ ...p, starred: starred.has(`${t.weekStart}|${p.playerId}`) || (user && p.playerId === user.captain_id && user.reg_week <= t.weekStart) });
       if (!weeks.has(t.weekStart)) weeks.set(t.weekStart, []);
-      weeks.get(t.weekStart).push({ id: t.id, name: t.name, location: t.location, results: t.results.map(mark) });
+      const card = { id: t.id, name: t.name, location: t.location, results: t.results.map(mark) };
+      if (user) {
+        const reachedOf = new Map(t.results.map((r) => [r.playerId, r.reached]));
+        const entryOf = (id) => t.draw.find((d) => d.playerId === id) ?? t.results.find((r) => r.playerId === id);
+        // La scelta dell'utente in questo torneo: giocatore dello snapshot di quella settimana che partecipava al torneo.
+        const pickId = [...(snapByWeek.get(t.weekStart) ?? [])].find((id) => entryOf(id));
+        const line = (id, isCaptain) => {
+          const e = entryOf(id) ?? names.get(id) ?? { name: `Giocatore ${id}`, country: null };
+          const reached = reachedOf.get(id) ?? null;
+          return { playerId: id, name: e.name, country: e.country ?? null, reached, points: reached ? pointsFor(reached, isCaptain) : 0 };
+        };
+        const capPlays = user.reg_week <= t.weekStart && entryOf(user.captain_id);
+        card.mine = {
+          pick: pickId ? line(pickId, false) : null,
+          captain: capPlays ? line(user.captain_id, true) : null,
+        };
+      }
+      weeks.get(t.weekStart).push(card);
     }
     return [...weeks.entries()].map(([weekStart, tournaments]) => ({ weekStart, tournaments }));
   }

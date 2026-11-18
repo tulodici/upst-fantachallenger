@@ -218,3 +218,26 @@ test('RT-27: retry con backoff, 4xx non ritentati', async () => {
   await assert.rejects(api.request('bad', async () => { c2++; const e = new Error('nope'); e.status = 401; throw e; }));
   assert.equal(c2, 1);
 });
+
+test('tornei completati: scelta dell\'utente e punti ottenuti', async () => {
+  const h = await makeCore();
+  await bootstrap(h);
+  h.at(W, 9, 0);
+  const u = await h.core.register({ telegramId: '20', teamName: 'Scelte', captainId: 'p700' });
+  const opts = await h.core.pickOptions(await h.core.context());
+  const a = opts[0].participants.find((p) => p.playerId !== 'p700').playerId;
+  const b = opts[1].participants.find((p) => p.playerId !== 'p700').playerId;
+  await h.core.saveRoster(u, [a, b]);
+  h.at('2026-11-24', 16, 0);
+  await h.core.ensureSnapshots();
+  await h.core.adminSetResults('admin', { tournamentId: opts[0].id, results: [{ playerId: a, reached: 'finalist' }, { playerId: 'p700', reached: 'winner' }] });
+  await h.core.adminSetResults('admin', { tournamentId: opts[1].id, results: [{ playerId: 'p1', reached: 'winner' }] });
+  const wk = (await h.core.completedTournaments(u)).find((x) => x.weekStart === W);
+  const c0 = wk.tournaments.find((t) => t.id === opts[0].id).mine;
+  assert.equal(c0.pick.playerId, a);
+  assert.equal(c0.pick.points, 5); // finalista
+  assert.equal(c0.captain?.points ?? 20, 20); // capitano vincitore x2 (se partecipa al torneo)
+  const c1 = wk.tournaments.find((t) => t.id === opts[1].id).mine;
+  assert.equal(c1.pick.playerId, b);
+  assert.equal(c1.pick.points, 0); // non a podio
+});

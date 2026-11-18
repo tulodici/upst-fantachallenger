@@ -250,6 +250,14 @@ function participantsBlock(t) {
     h('div', { class: 'draw' }, ...t.participants.map((p) => h('div', {},
       p.seed != null || p.entry ? h('span', { style: 'display:inline-block;min-width:34px;font-weight:600' }, tag(p)) : h('span', { style: 'display:inline-block;min-width:34px' }), p.name))));
 }
+function mineBlock(t) {
+  if (!t.mine) return null;
+  const row = (icon, x, emptyText) => h('div', { class: 'row spread mine-row' },
+    h('span', { class: 'ellipsis' }, `${icon} `, x ? `${x.country ? `${flag(x.country)} ` : ''}${x.name}` : emptyText,
+      x ? h('span', { class: 'small' }, `  ${x.reached ? ROUND[x.reached][1] : 'fuori dal podio'}`) : null),
+    h('b', { class: x?.points ? 'pts-on' : '' }, x ? `+${x.points}` : '0'));
+  return h('div', { class: 'mine' }, row('🎯', t.mine.pick, 'Nessuna scelta'), t.mine.captain ? row('👑', t.mine.captain) : null);
+}
 function tournamentCard(t, { stars = false } = {}) {
   const order = ['winner', 'finalist', 'semifinalist'];
   const res = [...(t.results ?? [])].sort((a, b) => order.indexOf(a.reached) - order.indexOf(b.reached));
@@ -257,6 +265,7 @@ function tournamentCard(t, { stars = false } = {}) {
     h('div', { class: 'row spread' }, h('b', {}, t.name), t.status ? h('span', { class: 'small' }, statusLabel[t.status] ?? t.status) : null),
     t.location ? h('div', { class: 'small' }, t.location) : null,
     res.length ? h('div', { class: 'podium' }, ...res.map((r) => h('div', {}, `${ROUND[r.reached][0]} ${r.name}`, r.starred ? ' ⭐' : ''))) : null,
+    mineBlock(t),
     participantsBlock(t));
 }
 

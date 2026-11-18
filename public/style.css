@@ -123,3 +123,8 @@ ul.rules { padding-left: 18px; margin: 8px 0; } ul.rules li { margin: 6px 0; }
 .cards .slot { min-height: 64px; align-items: flex-start; }
 .cards .slot.empty { align-items: flex-start; font-weight: 500; }
 .item.sel { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+.mine { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.mine-row { gap: 10px; }
+.mine-row b { font-variant-numeric: tabular-nums; }
+.mine-row b.pts-on { color: var(--accent); }
