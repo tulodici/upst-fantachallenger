@@ -195,8 +195,8 @@ test('import dei draw salva il tabellone e lo espone tra i tornei in corso', asy
   await core.importDraws('2026-11-23');
   const r = await core.inProgressTournaments();
   const t = r.tournaments.find((x) => x.id === 't1');
-  assert.equal(t.bracket.length, 3);
-  assert.equal(t.bracket[2].label, 'Finale');
+  assert.equal(t.participants.length, 8);
+  assert.equal(t.results, undefined);
 });
 
 test('teste di serie e tipo di ingresso dal tabellone', () => {
@@ -204,4 +204,20 @@ test('teste di serie e tipo di ingresso dal tabellone', () => {
   const m = buildBracket(d)[0].matches[0];
   assert.equal(m.p1.seed, 1); assert.equal(m.p1.entry, null);
   assert.equal(m.p2.seed, null); assert.equal(m.p2.entry, 'Q');
+});
+
+test('partecipanti: teste di serie in ordine, poi gli altri, poi WC, poi Q/LL', async () => {
+  const mk = (id, seed) => ({ roundId: 4, player1: { ...P(id), seed }, player2: { ...P(id + 100), seed: null }, result: null, tbd: false });
+  const draw = { singles: [mk(1, '2'), mk(2, '1'), mk(3, 'q'), mk(4, 'wc'), mk(5, 'll'), mk(6, null)] };
+  const provider = { ...createMockProvider(), fetchWeekDraws: async (weekStart) => [{ id: 't9', name: 'Test', weekStart, status: 'scheduled', draw: drawParticipants(draw), bracket: buildBracket(draw) }] };
+  const { core, at } = await makeCore({ provider });
+  at('2026-11-23', 10);
+  await core.importDraws('2026-11-23');
+  const t = (await core.inProgressTournaments()).tournaments.find((x) => x.id === 't9');
+  const names = t.participants.map((p) => p.name);
+  const firstOf = (n) => names.indexOf(n);
+  assert.deepEqual(names.slice(0, 2), ['P2', 'P1']);                       // teste di serie 1, 2
+  assert.ok(firstOf('P6') < firstOf('P4'));                                // senza codice prima delle WC
+  assert.ok(firstOf('P4') < firstOf('P3') && firstOf('P4') < firstOf('P5')); // WC prima di Q/LL
+  assert.ok(firstOf('P106') < firstOf('P4'));                              // gli avversari senza codice vengono prima delle WC
 });

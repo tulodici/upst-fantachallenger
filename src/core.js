@@ -323,16 +323,44 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     return [...weeks.entries()].map(([weekStart, tournaments]) => ({ weekStart, tournaments }));
   }
 
+  /**
+   * Partecipanti di ogni torneo (senza risultati): teste di serie in ordine, poi gli altri per ranking, poi WC, poi Q/LL.
+   * Teste di serie e tipo di ingresso vengono dal tabellone salvato; senza tabellone si ripiega sull'elenco dei draw.
+   */
+  async function attachParticipants(list) {
+    if (!list.length) return;
+    const ph = list.map(() => '?').join(',');
+    const rows = await db.all(`SELECT tournament_id, data FROM tournament_brackets WHERE tournament_id IN (${ph})`, list.map((t) => t.id));
+    const brackets = new Map(rows.map((r) => [r.tournament_id, JSON.parse(r.data)]));
+    const posRows = await db.all('SELECT player_id, pos FROM rankings WHERE week_start = (SELECT MAX(week_start) FROM rankings)');
+    const pos = new Map(posRows.map((r) => [r.player_id, r.pos]));
+    for (const t of list) {
+      const map = new Map();
+      const bracket = brackets.get(t.id);
+      if (bracket) {
+        for (const round of bracket) for (const m of round.matches) for (const p of [m.p1, m.p2]) {
+          if (!p.id || !p.name) continue;
+          const prev = map.get(p.id) ?? { playerId: p.id, name: p.name, country: p.country ?? null, seed: null, entry: null };
+          map.set(p.id, { ...prev, seed: prev.seed ?? p.seed ?? null, entry: prev.entry ?? p.entry ?? null });
+        }
+      }
+      if (!map.size) {
+        for (const d of t.draw) map.set(d.playerId, { playerId: d.playerId, name: d.name, country: d.country, seed: null, entry: d.kind === 'qualifier' ? 'Q' : null });
+      }
+      const group = (p) => (p.seed != null ? 0 : !p.entry ? 1 : p.entry === 'WC' ? 2 : 3);
+      const ranked = (p) => pos.get(p.playerId) ?? 99999;
+      t.participants = [...map.values()].map((p) => ({ ...p, pos: pos.get(p.playerId) ?? null })).sort((a, b) =>
+        group(a) - group(b) || (group(a) === 0 ? a.seed - b.seed : 0) || ranked(a) - ranked(b) || a.name.localeCompare(b.name));
+      delete t.draw; delete t.results;
+    }
+  }
+
   async function inProgressTournaments() {
     const wk = mondayOf(clock());
     const ts = await tournamentsWithPeople(`week_start = ? AND status <> 'concluded'`, [wk]);
     const done = await tournamentsWithPeople(`week_start = ? AND status = 'concluded'`, [wk]);
     const all = [...ts, ...done];
-    const rows = all.length
-      ? await db.all(`SELECT tournament_id, data FROM tournament_brackets WHERE tournament_id IN (${all.map(() => '?').join(',')})`, all.map((t) => t.id))
-      : [];
-    const brackets = new Map(rows.map((r) => [r.tournament_id, JSON.parse(r.data)]));
-    for (const t of all) t.bracket = brackets.get(t.id) ?? null;
+    await attachParticipants(all);
     const last = all.map((t) => t.updatedAt).sort().at(-1) ?? null;
     return { weekStart: wk, updatedAt: last, tournaments: all };
   }
@@ -343,6 +371,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     // Domenica: la "prossima settimana" e' quella che inizia domani (i draw sono appena stati importati).
     const wk = addDays(mondayOf(now), 7);
     const ts = await tournamentsWithPeople(`week_start = ?`, [wk]);
+    await attachParticipants(ts);
     return { weekStart: wk, tournaments: ts, isSunday: p.dow === 7 };
   }
 
