@@ -21,6 +21,21 @@ export function createBot({ token, adminIds = [], appUrl, log = console }) {
     }
   }
 
+  async function sendDocument(chatId, filename, content, caption) {
+    if (!token) { log.info?.(`[bot:dry-run] sendDocument ${filename} (${content.length} caratteri)`); return true; }
+    const form = new FormData();
+    form.append('chat_id', String(chatId));
+    if (caption) form.append('caption', caption);
+    form.append('document', new Blob([content], { type: 'text/csv' }), filename);
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, { method: 'POST', body: form, signal: AbortSignal.timeout(30000) });
+      return Boolean((await res.json()).ok);
+    } catch (e) {
+      log.warn?.('sendDocument fallita', e.message);
+      return false;
+    }
+  }
+
   const notifyAdmins = async (text) => { for (const id of adminIds) await sendMessage(id, text); };
   const isAdmin = (telegramId) => adminIds.includes(String(telegramId));
 
@@ -50,6 +65,13 @@ export function createBot({ token, adminIds = [], appUrl, log = console }) {
       const jobs = q.jobs.slice(0, 6).map((j) => `${j.job} ${j.run_key}: ${j.status}${j.status === 'done' ? '' : ' – ' + String(j.message).slice(0, 80)}`).join('\n');
       return sendMessage(chatId, `Provider: ${q.provider}\nGiocatori: ${q.players} · Tornei: ${q.tournaments} · Iscritti: ${q.users}\nUltimo ranking: ${q.lastRankingWeek ?? '—'}\nQuota API: ${q.quota.used}/${q.quota.limit}\n\n${jobs || 'Nessun job eseguito'}`);
     }
+    if (cmd === '/scelte') {
+      const r = await core.adminPicksReport();
+      await core.audit(from, 'bot:scelte', { rows: r.rows });
+      const day = new Date().toISOString().slice(0, 10);
+      const ok = await sendDocument(chatId, `scelte-${day}.csv`, r.csv, `Scelte e punti di tutti, settimana per settimana (${r.rows} righe)`);
+      return ok ? undefined : sendMessage(chatId, '❌ Invio del file non riuscito, riprova.');
+    }
     if (cmd === '/ricalcola') {
       await core.recomputePoints();
       await core.audit(from, 'bot:ricalcola');
@@ -63,5 +85,5 @@ export function createBot({ token, adminIds = [], appUrl, log = console }) {
     }
   }
 
-  return { sendMessage, notifyAdmins, isAdmin, setup, handleUpdate };
+  return { sendMessage, sendDocument, notifyAdmins, isAdmin, setup, handleUpdate };
 }

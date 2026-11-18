@@ -258,6 +258,58 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     return withPositions(rows);
   }
 
+  /**
+   * Report admin: scelte di tutti, settimana per settimana, con i punti. CSV pronto per Excel (separatore ";", BOM UTF-8).
+   * Una riga per scelta, una per il capitano e un totale per squadra e settimana.
+   */
+  async function adminPicksReport() {
+    const users = await db.all('SELECT id, telegram_id, team_name, captain_id, reg_week FROM users ORDER BY team_name, id');
+    const rosters = await db.all('SELECT user_id, week_start, player_ids, status FROM rosters ORDER BY week_start, user_id');
+    const tournaments = await db.all('SELECT id, name, week_start, status FROM tournaments');
+    const draws = await db.all('SELECT tournament_id, player_id FROM draw_entries');
+    const results = await db.all('SELECT tournament_id, player_id, reached FROM tournament_results');
+    const players = new Map((await db.all('SELECT id, name FROM players')).map((p) => [p.id, p.name]));
+    const tById = new Map(tournaments.map((t) => [t.id, t]));
+    const inDraw = new Map(); // `${tournament}|${player}`
+    for (const d of draws) inDraw.set(`${d.tournament_id}|${d.player_id}`, true);
+    const resultOf = new Map(results.map((r) => [`${r.tournament_id}|${r.player_id}`, r.reached]));
+    const ROUND_IT = { winner: 'Vincitore', finalist: 'Finalista', semifinalist: 'Semifinalista' };
+
+    // torneo della settimana in cui il giocatore partecipa / ha un risultato
+    const locate = (weekStart, playerId) => {
+      const ts = tournaments.filter((t) => t.week_start === weekStart);
+      const t = ts.find((x) => resultOf.has(`${x.id}|${playerId}`)) ?? ts.find((x) => inDraw.has(`${x.id}|${playerId}`));
+      if (!t) return { tournament: '—', reached: null, closed: false };
+      return { tournament: t.name, reached: resultOf.get(`${t.id}|${playerId}`) ?? null, closed: t.status === 'concluded' };
+    };
+    const line = (week, u, type, playerId, isCaptain) => {
+      const loc = locate(week, playerId);
+      const points = loc.reached ? pointsFor(loc.reached, isCaptain) : 0;
+      const outcome = loc.reached ? ROUND_IT[loc.reached] : loc.closed ? 'Fuori dal podio' : (loc.tournament === '—' ? 'Non in un torneo della settimana' : 'In corso / non concluso');
+      return [week, u.team_name, u.telegram_id, type, loc.tournament, players.get(playerId) ?? playerId, outcome, points];
+    };
+
+    const weeks = new Set(rosters.map((r) => r.week_start));
+    for (const t of tournaments) weeks.add(t.week_start);
+    const rows = [];
+    for (const week of [...weeks].sort()) {
+      for (const u of users) {
+        if (u.reg_week > week) continue; // non ancora iscritto
+        const r = rosters.find((x) => x.user_id === u.id && x.week_start === week);
+        const mine = (r ? JSON.parse(r.player_ids) : []).map((id) => line(week, u, 'Scelta', id, false));
+        const cap = line(week, u, 'Capitano', u.captain_id, true);
+        const all = [...mine, ...(cap[4] !== '—' ? [cap] : [])];
+        if (!r && all.length === 0) continue;
+        rows.push(...all);
+        rows.push([week, u.team_name, u.telegram_id, 'Totale', '', '', '', all.reduce((n, x) => n + x[7], 0)]);
+      }
+    }
+    const header = ['Settimana', 'Squadra', 'Telegram ID', 'Tipo', 'Torneo', 'Giocatore', 'Risultato', 'Punti'];
+    const esc = (v) => { const t = String(v ?? ''); return /[";\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+    const csv = '\ufeff' + [header, ...rows].map((r) => r.map(esc).join(';')).join('\r\n') + '\r\n';
+    return { rows: rows.length, csv };
+  }
+
   async function myPoints(user) {
     const total = await db.get('SELECT COALESCE(SUM(points), 0) AS n FROM points WHERE user_id = ?', [user.id]);
     const history = await db.all(
@@ -700,6 +752,6 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     context, listPlayers, pickOptions, register, findUser, touchTeamName, saveRoster, getState, snapshotWeek, ensureSnapshots,
     recomputePoints, standings, completedTournaments, inProgressTournaments, nextWeekTournaments,
     importRanking, importDraws, importResults, sendReminders, dueJobs, runJob, defaultKey, tick,
-    adminSetResults, adminStatus, audit, windowPayload, dayOfWeekOf, reconcileProvider,
+    adminSetResults, adminStatus, adminPicksReport, audit, windowPayload, dayOfWeekOf, reconcileProvider,
   };
 }

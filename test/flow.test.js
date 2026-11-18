@@ -241,3 +241,21 @@ test('tornei completati: scelta dell\'utente e punti ottenuti', async () => {
   assert.equal(c1.pick.playerId, b);
   assert.equal(c1.pick.points, 0); // non a podio
 });
+
+test('report admin: scelte e punti per settimana in CSV', async () => {
+  const h = await makeCore();
+  await bootstrap(h);
+  h.at(W, 9, 0);
+  const u = await h.core.register({ telegramId: '30', teamName: 'Report; "Team"', captainId: 'p700' });
+  const opts = await h.core.pickOptions(await h.core.context());
+  const a = opts[0].participants.find((p) => p.playerId !== 'p700').playerId;
+  await h.core.saveRoster(u, [a]);
+  h.at('2026-11-24', 16, 0);
+  await h.core.ensureSnapshots();
+  await h.core.adminSetResults('admin', { tournamentId: opts[0].id, results: [{ playerId: a, reached: 'winner' }] });
+  const { csv, rows } = await h.core.adminPicksReport();
+  assert.ok(csv.startsWith('﻿Settimana;Squadra;Telegram ID;Tipo;Torneo;Giocatore;Risultato;Punti'));
+  assert.ok(rows >= 2);
+  assert.match(csv, new RegExp(`${W};"Report; ""Team""";30;Scelta;${opts[0].name};.*;Vincitore;10`));
+  assert.match(csv, new RegExp(`${W};"Report; ""Team""";30;Totale;;;;10`));
+});
