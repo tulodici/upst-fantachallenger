@@ -29,6 +29,7 @@ export function loadConfig(env = process.env) {
     // Solo sviluppo: accetta l'header X-Dev-User al posto dell'initData firmato.
     devAuth: env.DEV_AUTH === '1' && !prod,
     fakeNow: env.FAKE_NOW || '',
+    testWindowOpen: env.TEST_WINDOW_OPEN === '1',
     apiLimit: Number(env.API_MONTHLY_LIMIT || 150),
     webhookSecret: env.WEBHOOK_SECRET || (env.BOT_TOKEN ? crypto.createHash('sha256').update(env.BOT_TOKEN).digest('hex').slice(0, 32) : 'dev'),
     allowCaptainInRoster: env.ALLOW_CAPTAIN_IN_ROSTER === '1',

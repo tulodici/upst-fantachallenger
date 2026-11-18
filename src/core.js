@@ -27,7 +27,9 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
   // ---------------------------------------------------------------- contesto temporale / ranking
 
   async function context(now = clock()) {
-    const w = windowState(now);
+    const w = { ...windowState(now) };
+    // Solo per collaudo (TEST_WINDOW_OPEN=1): finestra sempre aperta sulla settimana corrente. Da togliere prima del lancio.
+    if (config.testWindowOpen) { w.open = true; w.closes = new Date(now.getTime() + 3600e3); }
     const ref = await db.get('SELECT MAX(week_start) AS w FROM rankings WHERE week_start < ?', [w.weekStart]);
     const refWeek = ref?.w ?? null;
     const nextOpens = now < w.opens ? w.opens : w.open ? null : windowOf(addDays(w.weekStart, 7)).opens;
