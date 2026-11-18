@@ -83,7 +83,7 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 .week-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--hint); margin: 16px 2px 8px; }
 .podium { display: grid; gap: 4px; margin-top: 8px; font-size: 15px; }
 details summary { cursor: pointer; color: var(--link); font-size: 14px; margin-top: 8px; }
-.draw { columns: 2; column-gap: 14px; font-size: 13px; margin-top: 6px; }
+.draw { columns: 1; font-size: 13px; margin-top: 6px; }
 .draw div { break-inside: avoid; padding: 1px 0; }
 
 /* classifica */
