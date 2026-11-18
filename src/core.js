@@ -379,6 +379,85 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     return { rows: users.length, tournaments: tournaments.length, xlsx };
   }
 
+  // ---------------------------------------------------------------- squadre fittizie per il collaudo (/demo)
+
+  const DEMO_PREFIX = 'demo-';
+  const DEMO_NAMES = ['Aces Anonimi', 'Rovescio Mancino', 'Net Cord Club', 'Tie-Break Boys', 'Smash Brothers', 'Slice & Dice', 'Serve & Volley', 'Drop Shot Team',
+    'Lob Squad', 'Deuce Ladies', 'Terra Rossa FC', 'Match Point', 'Set Up Team', 'Break Point', 'Doppio Fallo', 'Ace Hunters', 'Baseline Heroes', 'Quarti di Nobiltà', 'Challenger Fans', 'Cemento Armato'];
+
+  /** Cancella le squadre fittizie con scelte, snapshot e punti. */
+  async function removeDemoTeams() {
+    const users = await db.all(`SELECT id FROM users WHERE telegram_id LIKE ?`, [`${DEMO_PREFIX}%`]);
+    await db.tx(async (t) => {
+      for (const u of users) {
+        for (const table of ['points', 'roster_snapshots', 'rosters']) await t.run(`DELETE FROM ${table} WHERE user_id = ?`, [u.id]);
+        await t.run('DELETE FROM users WHERE id = ?', [u.id]);
+      }
+    });
+    if (users.length) await recomputePoints();
+    return { removed: users.length };
+  }
+
+  /**
+   * 20 squadre fittizie: settimana scorsa (rosa bloccata, con molti giocatori davvero arrivati a podio) e scelte casuali
+   * per la settimana corrente. Ripetibile: riparte sempre da zero. Se mancano i partecipanti della settimana scorsa li importa (costa quota).
+   */
+  async function seedDemoTeams({ count = 20 } = {}) {
+    const ctx = await context();
+    const prev = addDays(ctx.weekStart, -7);
+    await removeDemoTeams();
+    let imported = false;
+    let lastWeek = await pickOptions({ weekStart: prev });
+    if (lastWeek.length && lastWeek.every((t) => t.participants.length === 0)) { await importDraws(prev); imported = true; lastWeek = await pickOptions({ weekStart: prev }); }
+    const thisWeek = await pickOptions(ctx);
+    const prevResults = await db.all(
+      `SELECT tr.tournament_id, tr.player_id, tr.reached FROM tournament_results tr JOIN tournaments t ON t.id = tr.tournament_id WHERE t.week_start = ?`, [prev]);
+    const pos = await refPositions(ctx, [...new Set(prevResults.map((r) => r.player_id))]);
+    const captainPool = await db.all('SELECT player_id FROM rankings WHERE week_start = ? AND pos BETWEEN 201 AND ? ORDER BY pos', [ctx.refWeek, POOL_SIZE]);
+    if (!captainPool.length) throw new AppError('NO_RANKING', 'Ranking non disponibile', 503);
+    // generatore pseudo-casuale con seme fisso: risultati ripetibili
+    let seed = 20261118;
+    const rnd = () => { seed = (seed + 0x6d2b79f5) | 0; let x = Math.imul(seed ^ (seed >>> 15), 1 | seed); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
+    const pick = (arr) => arr[Math.floor(rnd() * arr.length)];
+    const goodCaptains = prevResults.filter((r) => { const q = pos.get(r.player_id); return q >= 201 && q <= POOL_SIZE; }).map((r) => r.player_id);
+
+    const regAt = romeToUtc(prev, 10).toISOString();
+    let nextWeekPicks = 0;
+    let lastWeekPicks = 0;
+    await db.tx(async (t) => {
+      for (let i = 0; i < count; i++) {
+        const captain = i < 6 && goodCaptains.length ? pick(goodCaptains) : pick(captainPool).player_id;
+        await t.run('INSERT INTO users (telegram_id, team_name, captain_id, reg_week, registered_at) VALUES (?, ?, ?, ?, ?)',
+          [`${DEMO_PREFIX}${String(i + 1).padStart(2, '0')}`, DEMO_NAMES[i % DEMO_NAMES.length], captain, prev, regAt]);
+        const u = await t.get('SELECT id FROM users WHERE telegram_id = ?', [`${DEMO_PREFIX}${String(i + 1).padStart(2, '0')}`]);
+        const choose = (tournaments, podiumShare) => {
+          const ids = [];
+          for (const tr of tournaments) {
+            if (rnd() < 0.15) continue; // salta il torneo
+            const podium = prevResults.filter((r) => r.tournament_id === tr.id && r.player_id !== captain).map((r) => r.player_id);
+            const pool = tr.participants.map((x) => x.playerId).filter((x) => x !== captain && !ids.includes(x));
+            const id = podium.length && rnd() < podiumShare ? pick(podium) : pool.length ? pick(pool) : null;
+            if (id && !ids.includes(id)) ids.push(id);
+          }
+          return ids;
+        };
+        const before = choose(lastWeek, 0.45); // "alcuni dei giocatori corretti"
+        const now = choose(thisWeek, 0);
+        lastWeekPicks += before.length;
+        nextWeekPicks += now.length;
+        const stamp = regAt;
+        await t.run(`INSERT INTO rosters (user_id, week_start, player_ids, status, updated_at) VALUES (?, ?, ?, 'locked', ?)`, [u.id, prev, JSON.stringify(before), stamp]);
+        for (const id of before) {
+          await t.run('INSERT INTO roster_snapshots (user_id, week_start, player_id, ref_pos) VALUES (?, ?, ?, NULL) ON CONFLICT DO NOTHING', [u.id, prev, id]);
+        }
+        await t.run(`INSERT INTO rosters (user_id, week_start, player_ids, status, updated_at) VALUES (?, ?, ?, 'draft', ?)`, [u.id, ctx.weekStart, JSON.stringify(now), iso()]);
+      }
+      await t.run('INSERT INTO snapshot_weeks (week_start, created_at) VALUES (?, ?) ON CONFLICT DO NOTHING', [prev, iso()]);
+    });
+    await recomputePoints();
+    return { teams: count, lastWeek: prev, lastWeekPicks, thisWeek: ctx.weekStart, thisWeekPicks: nextWeekPicks, importedDraws: imported };
+  }
+
   async function myPoints(user) {
     const total = await db.get('SELECT COALESCE(SUM(points), 0) AS n FROM points WHERE user_id = ?', [user.id]);
     const history = await db.all(
@@ -665,7 +744,8 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     if (!total) return { sent: 0 };
     const users = await db.all(
       `SELECT u.id, u.telegram_id, r.player_ids FROM users u
-         LEFT JOIN rosters r ON r.user_id = u.id AND r.week_start = ?`,
+         LEFT JOIN rosters r ON r.user_id = u.id AND r.week_start = ?
+        WHERE u.telegram_id NOT LIKE 'demo-%'`,
       [ctx.weekStart],
     );
     const filledOf = (u) => (u.player_ids ? JSON.parse(u.player_ids).length : 0);
@@ -821,6 +901,6 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     context, listPlayers, pickOptions, register, findUser, touchTeamName, saveRoster, getState, snapshotWeek, ensureSnapshots,
     recomputePoints, standings, completedTournaments, inProgressTournaments, nextWeekTournaments,
     importRanking, importDraws, importResults, sendReminders, dueJobs, runJob, defaultKey, tick,
-    adminSetResults, adminStatus, adminPicksReport, audit, windowPayload, dayOfWeekOf, reconcileProvider,
+    adminSetResults, adminStatus, adminPicksReport, seedDemoTeams, removeDemoTeams, audit, windowPayload, dayOfWeekOf, reconcileProvider,
   };
 }

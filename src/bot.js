@@ -73,6 +73,17 @@ export function createBot({ token, adminIds = [], appUrl, log = console }) {
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       return ok ? undefined : sendMessage(chatId, '❌ Invio del file non riuscito, riprova.');
     }
+    if (cmd === '/demo') {
+      if (args[0] === 'off') {
+        const r = await core.removeDemoTeams();
+        await core.audit(from, 'bot:demo-off', r);
+        return sendMessage(chatId, `🧹 Squadre fittizie eliminate: ${r.removed}.`);
+      }
+      await sendMessage(chatId, '⏳ Creo le squadre fittizie…');
+      const r = await core.seedDemoTeams({ count: 20 });
+      await core.audit(from, 'bot:demo', r);
+      return sendMessage(chatId, `✅ ${r.teams} squadre fittizie create.\nSettimana ${r.lastWeek}: ${r.lastWeekPicks} scelte (bloccate, con punti).\nSettimana ${r.thisWeek}: ${r.thisWeekPicks} scelte casuali.${r.importedDraws ? '\nImportati i partecipanti della settimana scorsa (quota API usata).' : ''}\nPer eliminarle: /demo off`);
+    }
     if (cmd === '/ricalcola') {
       await core.recomputePoints();
       await core.audit(from, 'bot:ricalcola');

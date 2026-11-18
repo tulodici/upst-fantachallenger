@@ -259,3 +259,24 @@ test('report admin: cartella XLSX con la struttura del foglio UPST', async () =>
   assert.equal(xlsx.subarray(0, 2).toString(), 'PK');
   assert.ok(xlsx.includes(Buffer.from('xl/worksheets/sheet3.xml'))); // MAIN, RANKING, Detailed_Scores
 });
+
+test('squadre fittizie: 20 squadre con scelte e punti, rimovibili', async () => {
+  const h = await makeCore();
+  await bootstrap(h);
+  h.at('2026-11-24', 16, 0); // settimana W chiusa; settimana scorsa = W0 (23-7)
+  const prev = '2026-11-16';
+  await h.core.runJob('draws', prev); // partecipanti e tornei della settimana scorsa
+  const tr = await h.db.all('SELECT id FROM tournaments WHERE week_start = ?', [prev]);
+  for (const [i, t] of tr.entries()) await h.core.adminSetResults('admin', { tournamentId: t.id, results: [
+    { playerId: `p${300 + i}`, reached: 'winner' }, { playerId: `p${310 + i}`, reached: 'finalist' }, { playerId: `p${320 + i}`, reached: 'semifinalist' }, { playerId: `p${330 + i}`, reached: 'semifinalist' }] });
+  const r = await h.core.seedDemoTeams({ count: 20 });
+  assert.equal(r.teams, 20);
+  assert.ok(r.lastWeekPicks > 0 && r.thisWeekPicks > 0);
+  const table = await h.core.standings();
+  assert.equal(table.length, 20);
+  const rep = await h.core.adminPicksReport();
+  assert.equal(rep.rows, 20);
+  assert.equal((await h.core.sendReminders()).sent ?? 0, 0); // niente promemoria alle squadre fittizie
+  assert.deepEqual(await h.core.removeDemoTeams(), { removed: 20 });
+  assert.equal((await h.core.standings()).length, 0);
+});
