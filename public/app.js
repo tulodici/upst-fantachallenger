@@ -293,7 +293,7 @@ function viewLeague() {
       const d = await api('/api/league');
       body.replaceChildren(d.rows.length
         ? h('div', { class: 'card', style: 'padding:4px 8px' }, h('table', { class: 'table' }, ...d.rows.map((r) =>
-          h('tr', { class: r.id === d.me ? 'me' : '' }, h('td', { class: 'n' }, r.position), h('td', {}, r.teamName), h('td', { class: 'p' }, r.points)))))
+          h('tr', { class: r.id === d.me ? 'me' : '' }, h('td', { class: 'n' }, r.position), h('td', {}, h('div', {}, r.teamName), r.captainName ? h('div', { class: 'small' }, `👑 ${r.captainName}`) : null), h('td', { class: 'p' }, r.points)))))
         : h('p', { class: 'muted center' }, 'Nessun team iscritto.'));
       const mine = body.querySelector('tr.me');
       mine?.scrollIntoView({ block: 'center' });
@@ -304,7 +304,7 @@ function viewLeague() {
 
 // ------------------------------------------------------------------ shell
 function tabbar() {
-  const tabs = [['team', '🎾', 'My Team'], ['tournaments', '🏟️', 'Tournaments'], ['league', '🏆', 'League']];
+  const tabs = [['team', '🎾', 'My Team'], ['tournaments', '🏟️', 'Tournaments'], ['league', '🏆', 'Classifica']];
   return h('nav', { class: 'tabbar' }, ...tabs.map(([k, ico, label]) =>
     h('button', { class: S.tab === k ? 'on' : '', onClick: () => { S.tab = k; render(); window.scrollTo(0, 0); } }, h('span', { class: 'ico' }, ico), label)));
 }

@@ -250,9 +250,9 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
 
   async function standings() {
     const rows = await db.all(
-      `SELECT u.id, u.team_name AS "teamName", COALESCE(SUM(p.points), 0) AS points
-         FROM users u LEFT JOIN points p ON p.user_id = u.id
-        GROUP BY u.id, u.team_name
+      `SELECT u.id, u.team_name AS "teamName", c.name AS "captainName", COALESCE(SUM(p.points), 0) AS points
+         FROM users u LEFT JOIN points p ON p.user_id = u.id LEFT JOIN players c ON c.id = u.captain_id
+        GROUP BY u.id, u.team_name, c.name
         ORDER BY points DESC, u.team_name ASC, u.id ASC`,
     );
     return withPositions(rows);
