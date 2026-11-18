@@ -1,45 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { deriveOutcome } from '../src/providers/outcome.js';
-import { sportsApi365Provider } from '../src/providers/sportsapi365.js';
+import { sportsApi365Provider, extractResults, drawParticipants, filterChallengers, weekOfStart } from '../src/providers/sportsapi365.js';
 import { makeCore } from './helpers.js';
 import { createMockProvider } from '../src/providers/mock.js';
 import { romeToUtc } from '../src/time.js';
 
-let n = 0;
-const m = (day, hh, roundId, winnerId, loserId) => ({ id: `m${++n}`, date: `2026-11-${day}T${hh}:00:00.000Z`, roundId, winnerId, loserId });
+process.env.SPORTSAPI365_MIN_INTERVAL_MS = '0';
+process.env.SPORTSAPI365_KEY = 'test-key';
 
-// Tabellone da 8: 4 quarti (round 3), 2 semifinali (4), finale (5); piu' una partita di qualificazione (round 1).
-const bracket = () => [
-  m('16', '10', 1, 'LL', 'Q9'), // il lucky loser perde in qualificazione
-  m('17', '10', 3, 'A', 'B'), m('17', '12', 3, 'C', 'D'), m('17', '14', 3, 'LL', 'E'), m('17', '16', 3, 'F', 'G'),
-  m('18', '10', 4, 'A', 'C'), m('18', '12', 4, 'LL', 'F'),
-  m('19', '12', 5, 'LL', 'A'),
-];
-
-test('esito torneo: vincitore, finalista, semifinalisti (anche con lucky loser campione)', () => {
-  const o = deriveOutcome(bracket());
-  assert.equal(o.status, 'concluded');
-  const r = Object.fromEntries(o.results.map((x) => [x.playerId, x.reached]));
-  assert.deepEqual(r, { LL: 'winner', A: 'finalist', C: 'semifinalist', F: 'semifinalist' });
-});
-
-test('esito torneo: finale non ancora giocata -> non concluso', () => {
-  const o = deriveOutcome(bracket().slice(0, -1));
-  assert.equal(o.status, 'in_progress');
-  assert.deepEqual(o.results, []);
-});
-
-test('esito torneo: una sola semifinale giocata -> non concluso (non scambia la semi per la finale)', () => {
-  const o = deriveOutcome(bracket().slice(0, 6));
-  assert.equal(o.status, 'in_progress');
-});
-
-test('esito torneo: walkover non registrato in semifinale -> anomalia, nessun punto assegnato', () => {
-  const b = bracket().filter((x) => !(x.roundId === 4 && x.winnerId === 'LL')); // semifinale del vincitore mancante
-  const o = deriveOutcome(b);
-  assert.equal(o.status, 'in_progress');
-  assert.ok(o.anomaly);
+const P = (id, name = `P${id}`) => ({ id, name, countryAcr: 'ITA' });
+const M = (roundId, a, b, winnerId, result = '6-3 6-4') => ({ roundId, player1: P(a), player2: P(b), result, winnerId, tbd: false });
+// tabellone da 8 (round 9 = quarti, 10 = semifinali, 12 = finale); vincitore 1, finalista 5, semifinalisti 3 e 7
+const fullDraw = () => ({
+  singles: [M(9, 1, 2, 1), M(9, 3, 4, 3), M(9, 5, 6, 5), M(9, 7, 8, 7), M(10, 1, 3, 1), M(10, 5, 7, 5), M(12, 1, 5, 1)],
+  qualifying: [M(1, 20, 21, 20), M(1, 1, 99, 1)],
 });
 
 function fakeApi() {
@@ -52,55 +26,115 @@ const withFetch = async (handler, fn) => {
   try { await fn(); } finally { globalThis.fetch = real; }
 };
 const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
-const env = (k) => { process.env.SPORTSAPI365_KEY = k; };
 
-test('provider reale: ranking nella forma reale dell\'API', async () => {
-  env('k');
-  const row = (pos, id, name, c) => ({ id: 1000 + pos, date: '2026-11-16T00:00:00.000Z', point: 1, position: pos, player: { id, name, countryAcr: c, country: { name: 'x', acronym: c } }, rankingPoints: 1 });
+test('esito dal tabellone: vincitore, finalista, semifinalisti', () => {
+  const o = extractResults(fullDraw());
+  assert.equal(o.status, 'concluded');
+  assert.deepEqual(Object.fromEntries(o.results.map((x) => [x.playerId, x.reached])), { 1: 'winner', 5: 'finalist', 3: 'semifinalist', 7: 'semifinalist' });
+});
+
+test('esito dal tabellone: finale non giocata o senza vincitore -> non concluso', () => {
+  const d = fullDraw();
+  d.singles[6] = { ...d.singles[6], result: null, winnerId: null };
+  assert.equal(extractResults(d).status, 'in_progress');
+  const e = fullDraw();
+  e.singles = e.singles.slice(0, 6); // nessuna finale
+  assert.equal(extractResults(e).status, 'in_progress');
+  const t = fullDraw();
+  t.singles[6] = { ...t.singles[6], player2: P('TBA'), tbd: true }; // segnaposto "TBA"
+  t.singles[6].player2.name = 'TBA';
+  assert.equal(extractResults(t).status, 'in_progress');
+});
+
+test('esito dal tabellone: semifinalisti incoerenti -> anomalia, nessun punto', () => {
+  const d = fullDraw();
+  d.singles = d.singles.filter((m) => !(m.roundId === 10 && m.player1.id === 5)); // semifinale mancante
+  const o = extractResults(d);
+  assert.equal(o.status, 'in_progress');
+  assert.ok(o.anomaly);
+});
+
+test('walkover/ritiro in semifinale conta come risultato (RL-17)', () => {
+  const d = fullDraw();
+  d.singles[4] = { ...d.singles[4], result: 'W/O' };
+  assert.equal(extractResults(d).status, 'concluded');
+});
+
+test('giocatori del tabellone: main draw e qualificandi', () => {
+  const p = drawParticipants(fullDraw());
+  assert.equal(p.find((x) => x.id === '1').kind, 'main');
+  assert.equal(p.find((x) => x.id === '20').kind, 'qualifier');
+  assert.equal(p.find((x) => x.id === '99').kind, 'qualifier');
+});
+
+test('filtro Challenger: rankId 1 e "challenger" nel nome (esclude ITF)', () => {
+  const r = filterChallengers([
+    { id: 1, name: 'Drummondville Challenger', rankId: 1 }, { id: 2, name: 'M15 Antalya', rankId: 1 },
+    { id: 3, name: 'Paris Masters', rankId: 5 }, { id: 4, name: 'Next Challenger', rank: { id: 1 } },
+  ]);
+  assert.deepEqual(r.map((t) => t.id), [1, 4]);
+});
+
+test('settimana ATP dalla data di inizio', () => {
+  assert.equal(weekOfStart('2026-11-16'), '2026-11-16');
+  assert.equal(weekOfStart('2026-11-18'), '2026-11-16');
+  assert.equal(weekOfStart('2026-11-22'), '2026-11-23'); // partenza di domenica -> lunedi' dopo
+  assert.equal(weekOfStart('boh'), null);
+});
+
+test('ranking: pageNo/pageSize, header e forma reale', async () => {
+  const row = (pos, id, name, c) => ({ id: 1000 + pos, date: '2026-11-16T00:00:00.000Z', position: pos, player: { id, name, countryAcr: c, country: { name: 'x', acronym: c } } });
   await withFetch((u, o) => {
     assert.equal(u.pathname, '/v1/tennis/atp/ranking/singles');
-    assert.equal(o.headers['X-Gravitee-Api-Key'], 'k');
+    assert.equal(u.searchParams.get('pageNo'), '2');
+    assert.equal(u.searchParams.get('pageSize'), '500');
+    assert.equal(o.headers['X-Gravitee-Api-Key'], 'test-key');
     return json({ data: [row(1, 24008, 'Alexander Zverev', 'GER'), row(2, 47275, 'Jannik Sinner', 'ITA')], hasNextPage: true });
   }, async () => {
-    const r = await sportsApi365Provider.fetchRankingPage(1, fakeApi());
+    const r = await sportsApi365Provider.fetchRankingPage(2, fakeApi());
     assert.deepEqual(r.players[1], { id: '47275', name: 'Jannik Sinner', country: 'ITA', rank: 2 });
     assert.equal(r.hasMore, true);
   });
 });
 
-test('provider reale: paginazione ignorata dal server -> errore chiaro', async () => {
-  env('k');
-  await withFetch(() => json({ data: [{ position: 1, player: { id: 1, name: 'A', countryAcr: 'ITA' } }], hasNextPage: true }), async () => {
-    await sportsApi365Provider.fetchRankingPage(1, fakeApi());
-    await assert.rejects(sportsApi365Provider.fetchRankingPage(2, fakeApi()), /SPORTSAPI365_PAGE_PARAM/);
+test('tornei e tabelloni: 1 calendario + 1 chiamata per Challenger (budget)', async () => {
+  const api = fakeApi();
+  await withFetch((u) => {
+    if (u.pathname === '/v1/tennis/calendar/active') {
+      assert.equal(u.searchParams.get('startDate'), '2026-11-23');
+      assert.equal(u.searchParams.get('endDate'), '2026-11-29');
+      return json({ data: [
+        { id: 22205, name: 'Drummondville Challenger', rankId: 1, startDate: '2026-11-23T00:00:00.000Z', countryAcr: 'CAN' },
+        { id: 22207, name: 'Montevideo Challenger', rankId: 1, date: '2026-11-23T00:00:00.000Z', countryAcr: 'URU' },
+        { id: 5, name: 'M15 Antalya', rankId: 1, startDate: '2026-11-23' },
+        { id: 6, name: 'Vecchio Challenger', rankId: 1, startDate: '2026-11-16' }, // inizia la settimana prima
+      ] });
+    }
+    assert.match(u.pathname, /^\/v1\/tennis\/tournament\/atp\/(Drummondville%20Challenger|Montevideo%20Challenger)\/2026\/draws$/);
+    assert.equal(u.searchParams.get('fullBracket'), 'true');
+    return json(fullDraw());
+  }, async () => {
+    const out = await sportsApi365Provider.fetchWeekDraws('2026-11-23', api);
+    assert.equal(api.calls.length, 3);
+    assert.deepEqual(out.map((t) => t.id), ['22205', '22207']);
+    assert.equal(out[0].location, 'CAN');
+    assert.ok(out[0].draw.length >= 8);
   });
 });
 
-test('provider reale: risultati filtrati sui soli Challenger della settimana', async () => {
-  env('k');
-  const match = (id, tour, date, r, w, l) => ({
-    id: String(id), matchId: String(id), date: `2026-11-${date}T12:00:00.000Z`, roundId: r, player1Id: w, player2Id: l, match_winner: w, result: '6-3 6-4', result_type: 'completed',
-    player1: { id: w, name: `P${w}`, countryAcr: 'ITA' }, player2: { id: l, name: `P${l}`, countryAcr: 'ESP' },
-    tournament: { id: tour.id, name: tour.name, date: tour.date, countryAcr: 'CAN' },
-  });
-  const CH = { id: 22205, name: 'Drummondville Challenger', date: '2026-11-16T00:00:00.000Z' };
-  const ATP = { id: 1, name: 'Paris Masters', date: '2026-11-16T00:00:00.000Z' };
-  const NEXT = { id: 22300, name: 'Next Challenger', date: '2026-11-23T00:00:00.000Z' };
-  const data = [
-    match(1, CH, '16', 3, 1, 2), match(2, CH, '16', 3, 3, 4), match(3, CH, '17', 4, 1, 3), match(4, CH, '17', 3, 5, 6),
-    match(5, CH, '18', 4, 5, 7), match(6, CH, '19', 5, 1, 5), match(7, ATP, '16', 3, 8, 9), match(8, NEXT, '23', 1, 10, 11),
-  ];
-  await withFetch((u) => {
-    assert.equal(u.pathname, '/v1/tennis/atp/results/2026-11-16/2026-11-23');
-    return json({ data, hasNextPage: false });
-  }, async () => {
-    const out = await sportsApi365Provider.fetchWeekResults('2026-11-16', [], fakeApi());
-    assert.equal(out.length, 1); // niente ATP maggiore, niente torneo della settimana dopo
-    assert.equal(out[0].tournamentId, '22205');
+test('risultati: usa i tornei noti dal DB senza ricontattare il calendario', async () => {
+  const api = fakeApi();
+  await withFetch((u) => { assert.match(u.pathname, /draws$/); return json(fullDraw()); }, async () => {
+    const out = await sportsApi365Provider.fetchWeekResults('2026-11-16', [{ id: '22205', name: 'Drummondville Challenger' }], api);
+    assert.equal(api.calls.length, 1);
     assert.equal(out[0].status, 'concluded');
-    const r = Object.fromEntries(out[0].results.map((x) => [x.playerId, x.reached]));
-    assert.deepEqual(r, { 1: 'winner', 5: 'finalist', 3: 'semifinalist', 7: 'semifinalist' });
-    assert.equal(out[0].results[0].name, 'P1'); // nome dal dato reale (per creare il giocatore se manca)
+    assert.equal(out[0].results.length, 4);
+  });
+});
+
+test('errore 429: espone Retry-After al client', async () => {
+  await withFetch(() => new Response('{}', { status: 429, headers: { 'retry-after': '7' } }), async () => {
+    await assert.rejects(sportsApi365Provider.fetchRankingPage(1, fakeApi()), (e) => e.status === 429 && e.retryAfterMs === 7000);
   });
 });
 

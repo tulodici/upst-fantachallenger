@@ -52,7 +52,7 @@ export function createApiClient({ db, clock, notifyAdmins, limit = 150, alarmRat
         await record(endpoint, false, String(e.message ?? e).slice(0, 200));
         const retriable = !(e.status >= 400 && e.status < 500 && e.status !== 429);
         if (!retriable || attempt >= maxRetries) throw e;
-        const wait = backoffMs[Math.min(attempt, backoffMs.length - 1)] ?? 0;
+        const wait = Math.max(backoffMs[Math.min(attempt, backoffMs.length - 1)] ?? 0, e.retryAfterMs ?? 0); // 429: rispetta Retry-After
         attempt++;
         if (wait) await new Promise((r) => setTimeout(r, wait));
       }
