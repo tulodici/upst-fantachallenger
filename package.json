@@ -1,0 +1,16 @@
+{
+  "name": "upst-fantachallenger",
+  "version": "1.0.0",
+  "description": "Fantasy game di tennis ATP Challenger come Telegram Mini App",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "MOCK_API=1 DEV_AUTH=1 DEMO_SEED=1 FAKE_NOW=2026-11-23T09:00:00Z node src/server.js",
+    "test": "node --test --no-warnings \"test/*.test.js\""
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}
