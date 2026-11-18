@@ -280,11 +280,12 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     const resultOf = new Map(results.map((r) => [`${r.tournament_id}|${r.player_id}`, r.reached]));
     const byTournament = (id, reached) => results.filter((r) => r.tournament_id === id && r.reached === reached).map((r) => nameOf(r.player_id));
 
-    const isoWeek = (d) => {
-      const t = new Date(`${d}T00:00:00Z`);
-      t.setUTCDate(t.getUTCDate() + 3 - ((t.getUTCDay() + 6) % 7));
-      const y1 = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
-      return 1 + Math.round(((t - y1) / 86400000 - 3 + ((y1.getUTCDay() + 6) % 7)) / 7);
+    // Numero di settimana come nel foglio di gioco: la settimana 1 parte dal primo lunedi' dell'anno (16/11/2026 = 46).
+    const weekNumber = (d) => {
+      const t = Date.parse(`${d}T00:00:00Z`);
+      const jan1 = new Date(Date.UTC(Number(d.slice(0, 4)), 0, 1));
+      const firstMonday = Date.UTC(jan1.getUTCFullYear(), 0, 1 + ((8 - jan1.getUTCDay()) % 7));
+      return Math.floor((t - firstMonday) / (7 * 86400000)) + 1;
     };
     const short = (n) => n.replace(/\s*\bchallenger\b\s*/i, ' ').replace(/\s+/g, ' ').trim() || n;
     // torneo della settimana in cui il giocatore ha un risultato o partecipa
@@ -326,7 +327,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     ranked.forEach((x, i) => posOf.set(x.u.id, i > 0 && ranked[i - 1].total === x.total ? posOf.get(ranked[i - 1].u.id) : i + 1));
 
     const head = (ref) => [
-      ['UPST', null, null, ...tournaments.map((t) => ({ v: `WEEK ${isoWeek(t.week_start)}`, s: STYLE.header }))],
+      ['UPST', null, null, ...tournaments.map((t) => ({ v: `WEEK ${weekNumber(t.week_start)}`, s: STYLE.header }))],
       ['FantaChallenger', null, ref, ...tournaments.map((t) => ({ v: short(t.name), s: STYLE.tournament }))],
     ];
     const rowOfUser = (i) => START + i;
