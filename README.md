@@ -30,7 +30,8 @@ npm test         # 18 test: regole, fuso orario, HMAC, flusso settimanale, quota
 | Mini App (My Team / Tournaments / League) | `public/` |
 
 ## ⚠️ Da completare prima del lancio
-- **`src/providers/sportsapi365.js`**: endpoint, autenticazione e nomi dei campi sono ipotesi (documentazione non consultabile). Va adattato alle risposte reali; il resto dell'app usa solo l'interfaccia normalizzata. Verificare paginazione del ranking e endpoint per data (RT-08..RT-10) e la licenza per app pubblica (RT-23). Il provider reale **non è stato testato**; la logica è testata col provider mock.
+- **`src/providers/sportsapi365.js`**: ranking e risultati sono verificati su risposte reali dell'API. Da controllare al primo avvio reale: il parametro di paginazione (default `page`, altrimenti `SPORTSAPI365_PAGE_PARAM`; l'app si ferma con un errore chiaro se la paginazione non funziona) e il filtro Challenger (nome torneo contenente "challenger", configurabile con `SPORTSAPI365_CHALLENGER_REGEX`). I **tabelloni della settimana successiva non vengono importati** (endpoint di elenco tornei non documentato): "Prossima settimana" resta vuota. Esiti ambigui (walkover non registrati, finale non giocata) non assegnano punti e avvisano gli admin. Verificare la licenza per app pubblica (RT-23).
+- **Passaggio da demo a dati reali**: con `MOCK_API=0` (o rimosso) e `SPORTSAPI365_KEY` impostata, al primo avvio i dati finti (giocatori, tornei, iscritti di prova) vengono eliminati e il ranking reale viene importato.
 - PostgreSQL: il codice usa SQL portabile ma i test girano su SQLite; fare un giro completo su Postgres in staging.
 - `public/privacy.html` è una bozza da far rivedere (RT-22). Definire stagione/premi/archivio (RL-25).
 

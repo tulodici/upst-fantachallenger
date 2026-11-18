@@ -389,15 +389,25 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
 
   /** RL-26/RL-27: `onlyIncomplete` per il ricalcolo del martedi' (solo tornei non ancora conclusi). */
   async function importResults(weekStart, { onlyIncomplete = false } = {}) {
-    const rows = await db.all(
-      `SELECT id, name FROM tournaments WHERE week_start = ? ${onlyIncomplete ? `AND status NOT IN ('concluded','cancelled')` : ''}`,
-      [weekStart],
-    );
-    let fetched = [];
-    if (rows.length) fetched = await provider.fetchWeekResults(weekStart, rows, api);
+    const rows = await db.all('SELECT id, name, status FROM tournaments WHERE week_start = ?', [weekStart]);
+    const status = new Map(rows.map((r) => [r.id, r.status]));
+    const done = (id) => ['concluded', 'cancelled'].includes(status.get(id));
+    // Martedi' (RL-26): se tutti i tornei noti sono gia' chiusi non serve spendere quota.
+    if (onlyIncomplete && rows.length > 0 && rows.every((r) => done(r.id))) return { week: weekStart, tournaments: 0, concluded: 0, skipped: 'tutti chiusi' };
+    let fetched = await provider.fetchWeekResults(weekStart, rows.filter((r) => !onlyIncomplete || !done(r.id)), api);
+    if (onlyIncomplete) fetched = fetched.filter((r) => !done(r.tournamentId));
+    const nameOf = new Map(rows.map((r) => [r.id, r.name]));
+    const anomalies = [];
     await db.tx(async (t) => {
       for (const r of fetched) {
-        await t.run('UPDATE tournaments SET status = ?, updated_at = ? WHERE id = ?', [r.status, iso(), r.tournamentId]);
+        // Mai declassare un torneo gia' chiuso (anche da correzione admin) con un risultato incerto.
+        if (r.status !== 'concluded' && r.status !== 'cancelled' && done(r.tournamentId)) continue;
+        if (r.anomaly) anomalies.push(`${r.name ?? nameOf.get(r.tournamentId) ?? r.tournamentId}: ${r.anomaly}`);
+        await t.run(
+          `INSERT INTO tournaments (id, name, week_start, status, location, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at`,
+          [r.tournamentId, r.name ?? nameOf.get(r.tournamentId) ?? `Torneo ${r.tournamentId}`, weekStart, r.status, r.location ?? null, iso()],
+        );
         if (r.status === 'concluded') {
           await t.run('DELETE FROM tournament_results WHERE tournament_id = ?', [r.tournamentId]);
           for (const x of r.results) {
@@ -411,7 +421,43 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
       }
     });
     await recomputePoints();
-    return { week: weekStart, tournaments: fetched.length, concluded: fetched.filter((x) => x.status === 'concluded').length };
+    if (anomalies.length) {
+      await bot.notifyAdmins(`⚠️ Risultati da verificare (settimana ${weekStart}):\n${anomalies.join('\n')}\nCorreggi con /api/admin/results o attendi la settimana successiva.`);
+    }
+    return { week: weekStart, tournaments: fetched.length, concluded: fetched.filter((x) => x.status === 'concluded').length, anomalies: anomalies.length };
+  }
+
+  // ---------------------------------------------------------------- passaggio dai dati demo ai dati reali
+
+  /**
+   * Se il DB contiene dati del provider fittizio e ora si usa quello reale, elimina i dati di gioco finti
+   * (giocatori, ranking, tornei, utenti con capitani finti). La quota API e il log di audit restano.
+   * Il passaggio inverso (reale -> mock) non cancella mai nulla.
+   */
+  async function reconcileProvider() {
+    const meta = await db.get(`SELECT v FROM meta WHERE k = 'data_provider'`);
+    let stored = meta?.v;
+    if (!stored) {
+      const mockish = await db.get(`SELECT COUNT(*) AS n FROM players WHERE id LIKE 'p%'`);
+      stored = mockish.n > 0 ? 'mock' : null;
+    }
+    const current = provider.name;
+    let purged = false;
+    if (stored === 'mock' && current !== 'mock') {
+      await db.tx(async (t) => {
+        for (const table of ['points', 'roster_snapshots', 'snapshot_weeks', 'rosters', 'tournament_results', 'draw_entries', 'tournaments', 'rankings', 'players', 'users', 'job_runs']) {
+          await t.run(`DELETE FROM ${table}`);
+        }
+      });
+      await audit('system', 'purge-mock-data', { from: 'mock', to: current });
+      await bot.notifyAdmins('🧹 Passaggio ai dati reali: eliminati giocatori, tornei e iscritti di prova. Import del ranking in corso.');
+      purged = true;
+    } else if (stored && stored !== 'mock' && current === 'mock') {
+      console.warn('ATTENZIONE: il DB contiene dati reali ma il provider attivo e\' MOCK (MOCK_API=1). Nessun dato modificato.');
+      return { purged: false, warning: true };
+    }
+    await db.run(`INSERT INTO meta (k, v) VALUES ('data_provider', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v`, [current]);
+    return { purged };
   }
 
   // ---------------------------------------------------------------- reminder (RG-18)
@@ -572,6 +618,6 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     context, listPlayers, register, findUser, touchTeamName, saveRoster, getState, snapshotWeek, ensureSnapshots,
     recomputePoints, standings, completedTournaments, inProgressTournaments, nextWeekTournaments,
     importRanking, importDraws, importResults, sendReminders, dueJobs, runJob, defaultKey, tick,
-    adminSetResults, adminStatus, audit, windowPayload, dayOfWeekOf,
+    adminSetResults, adminStatus, audit, windowPayload, dayOfWeekOf, reconcileProvider,
   };
 }

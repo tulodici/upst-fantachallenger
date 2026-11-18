@@ -1,31 +1,28 @@
-// Provider reale SportsAPI365 (licenza tennis).
-//
-// ⚠️ DA ADATTARE: la documentazione di SportsAPI365 non era consultabile durante lo sviluppo, quindi
-// endpoint, autenticazione e nomi dei campi qui sotto sono ipotesi configurabili via variabili d'ambiente.
-// Tutto il resto dell'app parla solo con l'interfaccia normalizzata di questo file:
-//
-//   fetchRankingPage(page, api)  -> { players: [{ id, name, country, rank }], hasMore }
-//   fetchWeekDraws(weekStart, api) -> [{ id, name, location, weekStart, status, draw: [{ id, name, country, kind }] }]
-//   fetchWeekResults(weekStart, tournaments, api) -> [{ tournamentId, status, results: [{ playerId, reached }] }]
-//
-// Verificare (RT-08..RT-10): quanti giocatori per pagina restituisce il ranking e se esistono endpoint
-// "tutti i tornei della settimana" / "risultati per data", per rispettare il budget di 150 chiamate/mese.
+// Provider reale SportsAPI365 (Direct API, tennis). Forme di risposta verificate su esempi reali:
+//   ranking:  GET /v1/tennis/atp/ranking/singles            -> { data: [{ position, player: { id, name, countryAcr } }], hasNextPage? }
+//   risultati: GET /v1/tennis/atp/results/{start}/{end}      -> { data: [{ matchId, date, roundId, match_winner, player1Id, player2Id,
+//                                                               player1:{id,name,countryAcr}, player2:{...}, tournament:{ id, name, date, countryAcr } }] }
+// Da verificare in produzione: nome del parametro di paginazione (default `page`, cambiabile con SPORTSAPI365_PAGE_PARAM).
+// I tabelloni (draw) della settimana successiva non sono importati: l'endpoint che elenca i tornei Challenger non e'
+// documentato nelle pagine consultabili. Senza draw, "Prossima settimana" resta vuota e i giocatori risultano "non in tabellone".
+import { addDays } from '../time.js';
+import { deriveOutcome } from './outcome.js';
 
 const cfg = () => ({
-  base: process.env.SPORTSAPI365_BASE_URL,
+  base: (process.env.SPORTSAPI365_BASE_URL || 'https://api.sportsapi365.com').replace(/\/+$/, '').replace(/\/v1\/tennis$/, ''),
   key: process.env.SPORTSAPI365_KEY,
-  authHeader: process.env.SPORTSAPI365_AUTH_HEADER || 'x-api-key',
-  rankingPath: process.env.SPORTSAPI365_RANKING_PATH || '/tennis/rankings/atp',
-  tournamentsPath: process.env.SPORTSAPI365_TOURNAMENTS_PATH || '/tennis/tournaments',
-  resultsPath: process.env.SPORTSAPI365_RESULTS_PATH || '/tennis/tournaments/{id}/results',
+  authHeader: process.env.SPORTSAPI365_AUTH_HEADER || 'X-Gravitee-Api-Key',
+  type: process.env.SPORTSAPI365_TYPE || 'atp',
+  pageParam: process.env.SPORTSAPI365_PAGE_PARAM || 'page',
+  challenger: new RegExp(process.env.SPORTSAPI365_CHALLENGER_REGEX || 'challenger', 'i'),
 });
 
 async function getJson(path, params = {}) {
   const c = cfg();
-  if (!c.base || !c.key) throw new Error('SPORTSAPI365_BASE_URL / SPORTSAPI365_KEY non configurati');
-  const url = new URL(c.base.replace(/\/$/, '') + path);
+  if (!c.key) throw new Error('SPORTSAPI365_KEY non configurata');
+  const url = new URL(`${c.base}/v1/tennis${path}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
-  const res = await fetch(url, { headers: { [c.authHeader]: c.key, accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
+  const res = await fetch(url, { headers: { [c.authHeader]: c.key, accept: 'application/json' }, signal: AbortSignal.timeout(30000) });
   if (!res.ok) {
     const err = new Error(`SportsAPI365 ${res.status} su ${path}`);
     err.status = res.status;
@@ -34,65 +31,76 @@ async function getJson(path, params = {}) {
   return res.json();
 }
 
-const first = (o, keys) => keys.map((k) => o?.[k]).find((v) => v !== undefined && v !== null);
-const asList = (d) => (Array.isArray(d) ? d : first(d, ['data', 'results', 'items', 'rankings', 'players']) ?? []);
+const rows = (d) => (Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : []);
 
-const normPlayer = (p) => ({
-  id: String(first(p, ['id', 'player_id', 'playerId'])),
-  name: String(first(p, ['name', 'player_name', 'full_name']) ?? 'Sconosciuto'),
-  country: first(p, ['country', 'country_code', 'nationality']) ?? null,
-});
+let firstRankingId = null; // protezione: se `page` fosse ignorato la pagina 2 ripeterebbe la 1
 
 export const sportsApi365Provider = {
   name: 'sportsapi365',
 
   async fetchRankingPage(page, api) {
     const c = cfg();
-    return api.request(`${c.rankingPath}?page=${page}`, async () => {
-      const data = await getJson(c.rankingPath, { page });
-      const rows = asList(data);
-      const players = rows.map((r) => ({ ...normPlayer(r.player ?? r), rank: Number(first(r, ['rank', 'position', 'ranking'])) }));
-      const hasMore = Boolean(first(data, ['next_page', 'has_more', 'hasMore'])) || (rows.length > 0 && players.at(-1).rank < 900 && rows.length >= 50);
+    const path = `/${c.type}/ranking/singles`;
+    return api.request(`${path}?${c.pageParam}=${page}`, async () => {
+      const data = await getJson(path, { [c.pageParam]: page });
+      const list = rows(data);
+      const players = list
+        .filter((r) => r.player?.id != null && Number.isInteger(Number(r.position)))
+        .map((r) => ({ id: String(r.player.id), name: String(r.player.name ?? 'Sconosciuto'), country: r.player.countryAcr ?? r.player.country?.acronym ?? null, rank: Number(r.position) }));
+      if (page === 1) firstRankingId = players[0]?.id ?? null;
+      else if (players[0] && players[0].id === firstRankingId) {
+        throw Object.assign(new Error(`Paginazione ranking non funzionante col parametro "${c.pageParam}" (pagina ${page} uguale alla 1): impostare SPORTSAPI365_PAGE_PARAM`), { status: 400 });
+      }
+      const hasMore = typeof data?.hasNextPage === 'boolean' ? data.hasNextPage : players.length > 0;
       return { players, hasMore };
     });
   },
 
-  async fetchWeekDraws(weekStart, api) {
-    const c = cfg();
-    return api.request(`${c.tournamentsPath}?week=${weekStart}`, async () => {
-      // ADATTARE: filtro "solo ATP Challenger" e struttura del draw dipendono dall'API reale (RL-19).
-      const data = await getJson(c.tournamentsPath, { start_date: weekStart, category: 'challenger', tour: 'atp' });
-      return asList(data).map((t) => ({
-        id: String(first(t, ['id', 'tournament_id'])),
-        name: String(first(t, ['name', 'tournament_name'])),
-        location: first(t, ['location', 'city', 'country']) ?? null,
-        weekStart,
-        status: 'scheduled',
-        draw: asList(first(t, ['draw', 'participants', 'players']) ?? []).map((p) => ({
-          ...normPlayer(p.player ?? p),
-          kind: /qual/i.test(String(first(p, ['type', 'kind', 'draw_type']) ?? '')) ? 'qualifier' : 'main',
-        })),
-      }));
-    });
+  // Vedi nota in testa: nessun endpoint noto per elencare i Challenger della settimana prima che inizino.
+  async fetchWeekDraws() {
+    return [];
   },
 
-  async fetchWeekResults(weekStart, tournaments, api) {
+  /** Risultati dei Challenger che iniziano il lunedi' `weekStart` (inclusi gli slittamenti fino al lunedi' dopo). */
+  async fetchWeekResults(weekStart, _tournaments, api) {
     const c = cfg();
-    const out = [];
-    for (const t of tournaments) {
-      const path = c.resultsPath.replace('{id}', encodeURIComponent(t.id));
-      out.push(await api.request(path, async () => {
-        const data = await getJson(path);
-        const rawStatus = String(first(data, ['status']) ?? '').toLowerCase();
-        const status = /cancel|aband/.test(rawStatus) ? 'cancelled' : /final|conclu|finished|complete/.test(rawStatus) ? 'concluded' : 'in_progress';
-        // ADATTARE: estrarre vincitore, finalista e semifinalisti dalla risposta reale.
-        const results = asList(first(data, ['results', 'standings', 'podium']) ?? []).map((r) => ({
-          playerId: String(first(r.player ?? r, ['id', 'player_id'])),
-          reached: String(first(r, ['reached', 'round', 'result'])).toLowerCase().replace('semi', 'semifinalist').replace(/^final$/, 'finalist'),
-        })).filter((r) => ['winner', 'finalist', 'semifinalist'].includes(r.reached));
-        return { tournamentId: t.id, status, results };
-      }));
+    const path = `/${c.type}/results/${weekStart}/${addDays(weekStart, 7)}`;
+    const matches = [];
+    let prevFirst = null;
+    for (let page = 1; page <= 30; page++) {
+      const data = await api.request(`${path}?${c.pageParam}=${page}`, () => getJson(path, { [c.pageParam]: page }));
+      const list = rows(data);
+      if (page > 1 && list[0] && String(list[0].id ?? list[0].matchId) === prevFirst) {
+        throw Object.assign(new Error(`Paginazione risultati non funzionante col parametro "${c.pageParam}": impostare SPORTSAPI365_PAGE_PARAM`), { status: 400 });
+      }
+      prevFirst = list[0] ? String(list[0].id ?? list[0].matchId) : null;
+      matches.push(...list);
+      if (!list.length || data?.hasNextPage !== true) break;
     }
-    return out;
+
+    const byTournament = new Map();
+    const names = new Map();
+    for (const m of matches) {
+      const t = m.tournament;
+      if (!t || !c.challenger.test(String(t.name ?? ''))) continue; // RL-19: solo ATP Challenger
+      if (String(t.date ?? '').slice(0, 10) !== weekStart) continue; // la settimana e' la data ufficiale di inizio (RT-07)
+      const winner = m.match_winner != null ? String(m.match_winner) : null;
+      const p1 = String(m.player1Id ?? m.player1?.id);
+      const p2 = String(m.player2Id ?? m.player2?.id);
+      if (!winner || (winner !== p1 && winner !== p2)) continue; // partita non decisa
+      names.set(p1, m.player1?.name);
+      names.set(p2, m.player2?.name);
+      const key = String(t.id);
+      if (!byTournament.has(key)) byTournament.set(key, { name: String(t.name), location: t.countryAcr ?? null, matches: [] });
+      byTournament.get(key).matches.push({ id: m.matchId ?? m.id, date: m.date, roundId: m.roundId, winnerId: winner, loserId: winner === p1 ? p2 : p1 });
+    }
+
+    return [...byTournament].map(([tournamentId, t]) => {
+      const out = deriveOutcome(t.matches);
+      return {
+        tournamentId, name: t.name, location: t.location, status: out.status, anomaly: out.anomaly,
+        results: out.results.map((r) => ({ ...r, name: names.get(r.playerId) ?? undefined })),
+      };
+    });
   },
 };

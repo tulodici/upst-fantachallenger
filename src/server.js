@@ -167,6 +167,7 @@ export async function createApp(config = loadConfig(), overrides = {}) {
     if (config.publicUrl) {
       await bot.setup({ webhookUrl: `${config.publicUrl}/telegram/webhook/${config.webhookSecret}`, secret: config.webhookSecret }).catch((e) => console.error('bot setup', e.message));
     }
+    await core.reconcileProvider().catch((e) => console.error('reconcileProvider', e));
     if (!overrides.noScheduler) {
       timer = setInterval(() => core.tick().catch((e) => console.error('tick', e)), 60_000);
       core.tick().catch((e) => console.error('tick', e));
