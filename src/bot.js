@@ -9,8 +9,9 @@ export function createBot({ token, adminIds = [], appUrl, log = console }) {
     return res.json();
   };
 
-  async function sendMessage(chatId, text, { openApp = false } = {}) {
+  async function sendMessage(chatId, text, { openApp = false, html = false } = {}) {
     const body = { chat_id: chatId, text };
+    if (html) body.parse_mode = 'HTML'; // il testo passato e' gia' HTML valido
     if (openApp && appUrl) body.reply_markup = { inline_keyboard: [[{ text: 'Apri il FantaChallenger 🎾', web_app: { url: appUrl } }]] };
     try {
       const r = await api('sendMessage', body);
@@ -53,7 +54,7 @@ export function createBot({ token, adminIds = [], appUrl, log = console }) {
     const [cmd, ...args] = msg.text.trim().split(/\s+/);
     const from = String(msg.from?.id);
     if (cmd === '/start') {
-      return sendMessage(chatId, 'Benvenuto nel FantaChallenger di Un Podcast Sul Tennis\n\nDimostra la tua conoscenza del tennis che conta!\n\nOgni settimana pronostica i vincitori dei tornei Challenger in corso.', { openApp: true });
+      return sendMessage(chatId, '<b>Benvenuto nel FantaChallenger di Un Podcast Sul Tennis</b>\n\nDimostra la tua conoscenza del tennis che conta!\n\nOgni settimana pronostica i vincitori dei tornei Challenger in corso.', { openApp: true, html: true });
     }
     if (!isAdmin(from)) return;
     if (cmd === '/quota') {
