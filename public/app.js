@@ -57,35 +57,23 @@ async function getPlayers(mode) { // solo capitano: lista 201–900
 }
 const getTournamentOptions = async () => (await api('/api/players?mode=roster')).tournaments; // sempre aggiornato
 
-// ------------------------------------------------------------------ regole (RG-12)
-function rulesContent() {
-  return h('ul', { class: 'rules' },
-    h('li', {}, h('b', {}, 'Capitano: '), 'lo scegli all\'iscrizione tra i giocatori dal 201° al 900° posto. Resta lo stesso per tutta la stagione e i suoi punti valgono il triplo (x3). Segna anche se non compili la rosa.'),
-    h('li', {}, h('b', {}, 'Bonus Underdog: '), 'se un giocatore che hai scelto per un torneo non è testa di serie (compresi qualificati e wild card) e arriva a podio, i suoi punti valgono il doppio (x2). Non si cumula con il bonus Capitano.'),
-    h('li', {}, h('b', {}, 'Rosa: '), 'ogni settimana scegli un giocatore per ciascun torneo Challenger, tra i partecipanti del torneo. Puoi saltare un torneo: il numero di giocatori in rosa cambia di settimana in settimana.'),
-    h('li', {}, h('b', {}, 'Orari: '), 'la rosa si modifica quante volte vuoi da lunedì 00:01 a martedì 15:00 (ora di Roma). Se non la compili resta vuota: non viene riportata quella della settimana prima.'),
-    h('li', {}, h('b', {}, 'Punti: '), 'vincitore 10, finalista 5, semifinalista 2; il capitano 20 / 10 / 4. Contano solo i tornei ATP Challenger, anche per ritiro o walkover.'),
-    h('li', {}, 'Se un giocatore scelto non gioca (ritiro, forfait), non ci sono rimedi.'),
-    h('li', {}, 'A pari punti si occupa la stessa posizione in classifica.'),
-    h('li', {}, 'Le informazioni sui tabelloni sono aggiornate solo agli orari di importazione e possono essere incomplete per qualificati e lucky loser.'),
-  );
-}
-// Regolamento breve della schermata di benvenuto.
-function regolamentoBreve() {
-  const li = (title, text) => h('li', {}, h('b', {}, `${title} `), text);
+// Regolamento: stesso testo all'iscrizione e nella schermata "Come si gioca".
+function regolamento() {
+  const li = (title, ...parts) => h('li', {}, h('b', {}, `${title} `), ...parts);
+  const b = (t) => h('b', {}, t);
   return h('ol', { class: 'rules' },
-    li('Scegli il capitano.', 'All’iscrizione scegli un giocatore fuori dalla top-200 ATP. Resterà nella tua squadra per tutta la stagione e i suoi punti valgono ×3.'),
+    li('Scegli il Capitano.', 'Il Capitano deve essere un giocatore fuori dalla top-200 ATP e resterà nella tua squadra per tutta la stagione. I suoi punti sono moltiplicati ', b('×3'), '.'),
     li('Ogni settimana scegli un giocatore per torneo.', 'Per ogni torneo Challenger in programma scegli un partecipante su cui puntare.'),
-    li('Bonus Underdog.', 'Se scegli un giocatore che non è testa di serie (riquadro x2) i punti che ottiene valgono x2.'),
-    li('Finestra di scelta.', 'Le scelte possono essere fatte da lunedì alle 00:01 a martedì alle 15:00 (ora italiana). Poi la rosa sarà congelata fino alla settimana successiva.'),
-    li('Distribuzione punti.', 'Vincitore 10, Finalista 5, Semifinalista 2.'),
+    li('Bonus Underdog.', 'Se scegli un giocatore che non è testa di serie (riquadro x2) i punti che ottiene saranno moltiplicati ', b('x2'), '.'),
+    li('Finestra di scelta.', 'Puoi selezionare i tuoi giocatori da lunedì alle 00:01 fino a martedì alle 15:00 (ora italiana). Poi la rosa sarà congelata fino alla settimana successiva.'),
+    li('Distribuzione punti.', 'Vincitore ', b('10'), ', Finalista ', b('5'), ', Semifinalista ', b('2'), '.'),
   );
 }
 function openRules() {
   const back = h('div', { class: 'sheet-back', onClick: (e) => e.target === back && back.remove() },
     h('div', { class: 'sheet' },
-      h('header', {}, h('div', { class: 'row spread' }, h('h2', {}, 'Come si gioca'), h('button', { class: 'link', onClick: () => back.remove() }, 'Chiudi'))),
-      h('div', { class: 'list', style: 'padding:0 16px 16px' }, rulesContent(),
+      h('header', {}, h('div', { class: 'row spread' }, h('h2', {}, 'Regolamento'), h('button', { class: 'link', onClick: () => back.remove() }, 'Chiudi'))),
+      h('div', { class: 'list', style: 'padding:0 16px 16px' }, regolamento(),
         h('p', { class: 'muted' }, h('a', { href: '/privacy', target: '_blank', class: 'link' }, 'Informativa sulla privacy')))));
   document.body.append(back);
 }
@@ -184,7 +172,7 @@ function viewWelcome() {
     h('div', { class: 'card' }, h('h3', { style: 'margin-bottom:8px' }, '1. Scegli il Capitano'), chosenBox,
       h('p', { class: 'muted', style: 'margin-bottom:0' }, 'Il Capitano rimarrà nella tua squadra per tutta la stagione e riceverà punti moltiplicati x3, ma deve essere fuori dalla top-200 del ranking ATP attuale.')),
     go,
-    h('div', { class: 'card', style: 'margin-top:12px' }, h('h3', {}, 'Regolamento'), regolamentoBreve()),
+    h('div', { class: 'card', style: 'margin-top:12px' }, h('h3', {}, 'Regolamento'), regolamento()),
   );
 }
 
