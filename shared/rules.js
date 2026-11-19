@@ -23,10 +23,17 @@ export function isCaptainEligible(pos) {
   return Number.isInteger(pos) && pos >= CAPTAIN_MIN_POS && pos <= CAPTAIN_MAX_POS;
 }
 
-/** RL-17..RL-20: punti per round raggiunto, raddoppiati per il capitano. */
-export function pointsFor(reached, isCaptain = false) {
+export const CAPTAIN_MULTIPLIER = 3;
+export const UNDERDOG_MULTIPLIER = 2;
+
+/**
+ * Punti per round raggiunto. Il capitano vale x3; una scelta settimanale fuori dalle teste di serie ("underdog") vale x2.
+ * I due bonus non si cumulano: se e' il capitano si applica solo il x3.
+ */
+export function pointsFor(reached, isCaptain = false, underdog = false) {
   const base = POINTS[reached] ?? 0;
-  return isCaptain ? base * 2 : base;
+  if (isCaptain) return base * CAPTAIN_MULTIPLIER;
+  return underdog ? base * UNDERDOG_MULTIPLIER : base;
 }
 
 function counts(positions) {

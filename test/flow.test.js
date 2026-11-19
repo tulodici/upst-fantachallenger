@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createMockProvider } from '../src/providers/mock.js';
 import { makeCore } from './helpers.js';
 import { createApiClient, QuotaExhaustedError } from '../src/apiClient.js';
 import { romeToUtc } from '../src/time.js';
@@ -86,18 +87,18 @@ test('flusso completo di una settimana', async () => {
       { playerId: x2, reached: 'semifinalist' },
     ],
   });
-  // Alice: x1 10 + x2 2 + capitano p300 (semifinale) 4 = 16. Carlo: capitano finalista 10. Bob/Dora: 0.
+  // Alice: x1 10 + x2 2 + capitano p300 (semifinale) 6 = 18. Carlo: capitano finalista 15. Bob/Dora: 0.
   let table = await core.standings();
   const pts = Object.fromEntries(table.map((r) => [r.teamName + r.id, r.points]));
-  assert.equal(pts[`Alice${a.id}`], 16);
-  assert.equal(pts[`Carlo${c.id}`], 10);
+  assert.equal(pts[`Alice${a.id}`], 18);
+  assert.equal(pts[`Carlo${c.id}`], 15);
   assert.deepEqual(table.map((r) => r.position), [1, 2, 3, 3]); // Bob e Dora a pari merito (RL-23)
 
   // Ricalcolo idempotente (RT-13)
   await core.recomputePoints();
   await core.recomputePoints();
   table = await core.standings();
-  assert.equal(table[0].points, 16);
+  assert.equal(table[0].points, 18);
 
   // Torneo annullato: punti rimossi dopo correzione (RL-27, RT-25)
   await core.adminSetResults('admin', { tournamentId: t1, status: 'cancelled', results: [] });
@@ -127,7 +128,7 @@ test('rosa non compilata resta vuota e il capitano segna comunque (RL-07, RL-14)
   h.at('2026-11-24', 16, 0);
   await h.core.ensureSnapshots();
   await h.core.adminSetResults('admin', { tournamentId: `t-${W}-1`, results: [{ playerId: 'p700', reached: 'winner' }] });
-  assert.equal((await h.core.getState(u)).points.total, 20);
+  assert.equal((await h.core.getState(u)).points.total, 30);
   // settimana successiva: nessun riporto automatico
   h.at('2026-11-30', 9, 0);
   assert.deepEqual((await h.core.getState(u)).roster.playerIds, []);
@@ -236,7 +237,7 @@ test('tornei completati: scelta dell\'utente e punti ottenuti', async () => {
   const c0 = wk.tournaments.find((t) => t.id === opts[0].id).mine;
   assert.equal(c0.pick.playerId, a);
   assert.equal(c0.pick.points, 5); // finalista
-  assert.equal(c0.captain?.points ?? 20, 20); // capitano vincitore x2 (se partecipa al torneo)
+  assert.equal(c0.captain?.points ?? 30, 30); // capitano vincitore x3 (se partecipa al torneo)
   const c1 = wk.tournaments.find((t) => t.id === opts[1].id).mine;
   assert.equal(c1.pick.playerId, b);
   assert.equal(c1.pick.points, 0); // non a podio
@@ -292,4 +293,29 @@ test('deleteTeam: elimina squadra, rosa e punti di un solo utente', async () => 
   assert.ok(await h.core.findUser('41'));
   assert.deepEqual(await h.core.deleteTeam('40'), { removed: 0 });
   assert.ok(a);
+});
+
+test('bonus underdog x2: solo per giocatori senza testa di serie, non cumulabile con il capitano', async () => {
+  const mk = (id, seed) => ({ id, name: `P${id}`, countryAcr: 'ITA', seed });
+  const bracket = [{ roundId: 12, label: 'Finale', matches: [{ p1: { id: 'p301', name: 'Seed', seed: 1 }, p2: { id: 'p302', name: 'Under', seed: null, entry: 'Q' }, winnerId: 'p302', score: '6-4 6-4' }] }];
+  const provider = { ...createMockProvider(), fetchWeekDraws: async (weekStart) => [{ id: 'tb', name: 'Test Challenger', weekStart, status: 'scheduled',
+    draw: [{ id: 'p301', name: 'Seed', country: 'ITA', kind: 'main' }, { id: 'p302', name: 'Under', country: 'ITA', kind: 'qualifier' }], bracket }] };
+  const h = await makeCore({ provider });
+  h.at('2026-11-16', 12, 30);
+  await h.core.runJob('ranking', '2026-11-16');
+  h.at('2026-11-22', 9, 0);
+  await h.core.runJob('draws', '2026-11-23');
+  h.at('2026-11-24', 10, 0);
+  const s1 = await h.core.register({ telegramId: '50', teamName: 'Favorito', captainId: 'p700' });
+  const s2 = await h.core.register({ telegramId: '51', teamName: 'Underdog', captainId: 'p701' });
+  const s3 = await h.core.register({ telegramId: '52', teamName: 'Capitano', captainId: 'p302' });
+  await h.core.saveRoster(s1, ['p301']);
+  await h.core.saveRoster(s2, ['p302']);
+  h.at('2026-11-24', 16, 0);
+  await h.core.ensureSnapshots();
+  await h.core.adminSetResults('admin', { tournamentId: 'tb', results: [{ playerId: 'p302', reached: 'winner' }, { playerId: 'p301', reached: 'finalist' }, { playerId: 'p5', reached: 'semifinalist' }, { playerId: 'p6', reached: 'semifinalist' }] });
+  const pts = Object.fromEntries((await h.core.standings()).map((r) => [r.teamName, r.points]));
+  assert.equal(pts.Favorito, 5); // finalista testa di serie: nessun bonus
+  assert.equal(pts.Underdog, 20); // vincitore non testa di serie: 10 x2
+  assert.equal(pts.Capitano, 30); // capitano vincitore: x3, senza cumulare l'underdog
 });

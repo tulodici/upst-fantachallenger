@@ -201,6 +201,26 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
 
   // ---------------------------------------------------------------- punti (RT-13: ricalcolo completo, idempotente)
 
+  /**
+   * Teste di serie dai tabelloni salvati: `isUnderdog(torneo, giocatore)` e' vero se il giocatore e' in tabellone senza
+   * numero di testa di serie (anche qualificato, wild card, lucky loser). Senza tabellone salvato non c'e' bonus.
+   */
+  async function seedInfo() {
+    const rows = await db.all('SELECT tournament_id, data FROM tournament_brackets');
+    const underdog = new Set();
+    for (const r of rows) {
+      const seeded = new Set();
+      const all = new Set();
+      for (const round of JSON.parse(r.data)) for (const m of round.matches) for (const p of [m.p1, m.p2]) {
+        if (!p.id) continue;
+        all.add(p.id);
+        if (p.seed != null) seeded.add(p.id);
+      }
+      for (const id of all) if (!seeded.has(id)) underdog.add(`${r.tournament_id}|${id}`);
+    }
+    return { isUnderdog: (tournamentId, playerId) => underdog.has(`${tournamentId}|${playerId}`) };
+  }
+
   async function recomputePoints() {
     const results = await db.all(
       `SELECT tr.tournament_id, tr.player_id, tr.reached, t.week_start
@@ -221,10 +241,11 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
       if (!snapUsers.has(k)) snapUsers.set(k, []);
       snapUsers.get(k).push(s.user_id);
     }
+    const seeds = await seedInfo();
     const rows = [];
     for (const r of results) {
       const captainSet = new Set();
-      // RL-07/RL-20: il capitano segna sempre (anche con rosa vuota), doppio; vale dalla settimana di iscrizione (RL-08).
+      // RL-07/RL-20: il capitano segna sempre (anche con rosa vuota), x3; vale dalla settimana di iscrizione (RL-08).
       for (const u of captainUsers.get(r.player_id) ?? []) {
         if (u.reg_week <= r.week_start) {
           captainSet.add(u.id);
@@ -233,7 +254,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
       }
       for (const uid of snapUsers.get(`${r.week_start}|${r.player_id}`) ?? []) {
         if (captainSet.has(uid) || !userById.has(uid)) continue;
-        rows.push([uid, r.week_start, r.tournament_id, r.player_id, pointsFor(r.reached, false), 0]);
+        rows.push([uid, r.week_start, r.tournament_id, r.player_id, pointsFor(r.reached, false, seeds.isUnderdog(r.tournament_id, r.player_id)), 0]);
       }
     }
     await db.tx(async (t) => {
@@ -264,9 +285,10 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
    *  MAIN            una colonna per torneo (raggruppati per settimana), sotto l'esito (SF, SF, F, W) e una riga per squadra
    *                  con totale, capitano e giocatore scelto in ogni torneo.
    *  RANKING         classifica con pari merito.
-   *  Detailed_Scores punti di ogni squadra in ogni torneo (scelta + capitano x2), totale e posizione.
+   *  Detailed_Scores punti di ogni squadra in ogni torneo (scelta con bonus underdog x2 + capitano x3), totale e posizione.
    */
   async function adminPicksReport() {
+    const seeds = await seedInfo();
     const users = await db.all('SELECT id, telegram_id, team_name, captain_id, reg_week FROM users');
     users.sort((x, y) => x.team_name.localeCompare(y.team_name, 'it', { sensitivity: 'base' }) || x.id - y.id);
     const rosters = await db.all('SELECT user_id, week_start, player_ids FROM rosters');
@@ -312,7 +334,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
           picks.set(t.id, id);
           const reached = resultOf.get(`${t.id}|${id}`);
           if (reached) medal.set(t.id, reached);
-          pts.set(t.id, (pts.get(t.id) ?? 0) + (reached ? pointsFor(reached, false) : 0));
+          pts.set(t.id, (pts.get(t.id) ?? 0) + (reached ? pointsFor(reached, false, seeds.isUnderdog(t.id, id)) : 0));
         }
       }
       for (const t of tournaments) { // capitano: dal suo settimana d'iscrizione, anche senza rosa
@@ -339,7 +361,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     const main = head({ v: 'Capitano', s: STYLE.header });
     main[0][0] = { v: 'UPST', s: STYLE.bold };
     main[1][0] = { v: 'FantaChallenger', s: STYLE.bold };
-    const legend = [['SF', 2, '- Un giocatore per torneo'], ['SF', 2, '- Non sostituibile: il capitano'], ['F', 5, '- Capitano dal 201° al 900° del ranking'], ['W', 10, '- Moltiplicatore punti x2 (capitano in verde)']];
+    const legend = [['SF', 2, '- Un giocatore per torneo'], ['SF', 2, '- Non sostituibile: il capitano'], ['F', 5, '- Capitano dal 201° al 900° del ranking'], ['W', 10, '- Capitano x3 (verde); Underdog x2 (non testa di serie)']];
     const reachedRows = [['semifinalist', 0], ['semifinalist', 1], ['finalist', 0], ['winner', 0]];
     legend.forEach(([code, points, note], i) => {
       main.push([{ v: code, s: STYLE.center }, { v: points, s: STYLE.center }, note,
@@ -534,6 +556,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     const ts = await tournamentsWithPeople(`status = 'concluded'`, []);
     let starred = new Set();
     const snapByWeek = new Map();
+    const seeds = await seedInfo();
     const names = new Map();
     if (user) {
       const snaps = await db.all('SELECT week_start, player_id FROM roster_snapshots WHERE user_id = ?', [user.id]);
@@ -555,7 +578,8 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
         const line = (id, isCaptain) => {
           const e = entryOf(id) ?? names.get(id) ?? { name: `Giocatore ${id}`, country: null };
           const reached = reachedOf.get(id) ?? null;
-          return { playerId: id, name: e.name, country: e.country ?? null, reached, points: reached ? pointsFor(reached, isCaptain) : 0 };
+          const underdog = !isCaptain && seeds.isUnderdog(t.id, id);
+          return { playerId: id, name: e.name, country: e.country ?? null, reached, underdog, points: reached ? pointsFor(reached, isCaptain, underdog) : 0 };
         };
         const capPlays = user.reg_week <= t.weekStart && entryOf(user.captain_id);
         card.mine = {

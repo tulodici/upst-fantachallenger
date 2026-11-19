@@ -41,7 +41,9 @@ test('RL-04: capitano tra 201 e 900', () => {
 
 test('RL-17/RL-20: punteggio e raddoppio capitano', () => {
   assert.deepEqual(['winner', 'finalist', 'semifinalist', 'quarter'].map((r) => pointsFor(r)), [10, 5, 2, 0]);
-  assert.deepEqual(['winner', 'finalist', 'semifinalist'].map((r) => pointsFor(r, true)), [20, 10, 4]);
+  assert.deepEqual(['winner', 'finalist', 'semifinalist'].map((r) => pointsFor(r, true)), [30, 15, 6]); // capitano x3
+  assert.deepEqual(['winner', 'finalist', 'semifinalist'].map((r) => pointsFor(r, false, true)), [20, 10, 4]); // underdog x2
+  assert.equal(pointsFor('winner', true, true), 30); // i bonus non si cumulano: vale il capitano
 });
 
 test('RL-23: pari merito con stessa posizione (1,1,3)', () => {

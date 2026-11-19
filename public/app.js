@@ -60,7 +60,8 @@ const getTournamentOptions = async () => (await api('/api/players?mode=roster'))
 // ------------------------------------------------------------------ regole (RG-12)
 function rulesContent() {
   return h('ul', { class: 'rules' },
-    h('li', {}, h('b', {}, 'Capitano: '), 'lo scegli all\'iscrizione tra i giocatori dal 201° al 900° posto. Resta lo stesso per tutta la stagione e i suoi punti valgono il doppio. Segna anche se non compili la rosa.'),
+    h('li', {}, h('b', {}, 'Capitano: '), 'lo scegli all\'iscrizione tra i giocatori dal 201° al 900° posto. Resta lo stesso per tutta la stagione e i suoi punti valgono il triplo (x3). Segna anche se non compili la rosa.'),
+    h('li', {}, h('b', {}, 'Bonus Underdog: '), 'se un giocatore che hai scelto per un torneo non è testa di serie (compresi qualificati e wild card) e arriva a podio, i suoi punti valgono il doppio (x2). Non si cumula con il bonus Capitano.'),
     h('li', {}, h('b', {}, 'Rosa: '), 'ogni settimana scegli un giocatore per ciascun torneo Challenger, tra i partecipanti del torneo. Puoi saltare un torneo: il numero di giocatori in rosa cambia di settimana in settimana.'),
     h('li', {}, h('b', {}, 'Orari: '), 'la rosa si modifica quante volte vuoi da lunedì 00:01 a martedì 15:00 (ora di Roma). Se non la compili resta vuota: non viene riportata quella della settimana prima.'),
     h('li', {}, h('b', {}, 'Punti: '), 'vincitore 10, finalista 5, semifinalista 2; il capitano 20 / 10 / 4. Contano solo i tornei ATP Challenger, anche per ritiro o walkover.'),
@@ -170,7 +171,7 @@ function viewWelcome() {
       `La selezione della rosa è chiusa: finché non riapre${st.window.nextOpens ? ` (${fmtDateTime(st.window.nextOpens)})` : ''} segnerai solo con il capitano. Poi potrai comporre la rosa come tutti.`),
     !st.hasRanking && h('div', { class: 'notice' }, 'Il ranking non è ancora disponibile: riprova tra poco.'),
     h('div', { class: 'card' }, h('h3', { style: 'margin-bottom:8px' }, '1. Scegli il capitano'), chosenBox,
-      h('p', { class: 'muted', style: 'margin-bottom:0' }, 'Fisso per tutta la stagione, punti doppi, anche se la rosa è vuota.')),
+      h('p', { class: 'muted', style: 'margin-bottom:0' }, 'Fisso per tutta la stagione, punti x3, anche se la rosa è vuota.')),
     go,
     h('div', { class: 'card', style: 'margin-top:12px' }, h('h3', {}, 'Le regole in breve'), rulesContent()),
   );
@@ -254,7 +255,7 @@ function mineBlock(t) {
   if (!t.mine) return null;
   const row = (icon, x, emptyText) => h('div', { class: 'row spread mine-row' },
     h('span', { class: 'ellipsis' }, `${icon} `, x ? `${x.country ? `${flag(x.country)} ` : ''}${x.name}` : emptyText,
-      x ? h('span', { class: 'small' }, `  ${x.reached ? ROUND[x.reached][1] : 'fuori dal podio'}`) : null),
+      x ? h('span', { class: 'small' }, `  ${x.reached ? ROUND[x.reached][1] : 'fuori dal podio'}${x.underdog ? ' · Underdog x2' : ''}`) : null),
     h('b', { class: x?.points ? 'pts-on' : '' }, x ? `+${x.points}` : '0'));
   return h('div', { class: 'mine' }, row('🎯', t.mine.pick, 'Nessuna scelta'), t.mine.captain ? row('👑', t.mine.captain) : null);
 }
