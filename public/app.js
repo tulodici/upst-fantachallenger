@@ -113,7 +113,7 @@ async function openTournamentPicker({ tournament, selectedId, captainId, onPick,
   const back = h('div', { class: 'sheet-back', onClick: (e) => e.target === back && back.remove() });
   const list = h('div', { class: 'list' });
   const search = h('input', { type: 'search', placeholder: 'Cerca un giocatore…', autocomplete: 'off' });
-  const hint = tournament.seedsKnown ? h('div', { class: 'small', style: 'margin-top:6px' }, '[x2] = non testa di serie: se arriva a podio i suoi punti valgono il doppio (Bonus Underdog).') : null;
+  const hint = tournament.seedsKnown ? h('div', { class: 'small', style: 'margin-top:6px' }, 'Il riquadro x2 indica un giocatore non testa di serie: se arriva a podio i suoi punti valgono il doppio (Bonus Underdog).') : null;
   function paint() {
     const q = search.value.trim().toLowerCase();
     const rows = tournament.participants.filter((p) => !q || p.name.toLowerCase().includes(q) || (p.country ?? '').toLowerCase() === q);
@@ -122,9 +122,10 @@ async function openTournamentPicker({ tournament, selectedId, captainId, onPick,
       ...rows.map((p) => {
         const isCap = p.playerId === captainId;
         return h('button', { class: `item ${p.playerId === selectedId ? 'sel' : ''}`, disabled: isCap, onClick: () => { back.remove(); onPick(p); } },
-          h('span', { style: 'display:inline-block;min-width:44px;font-weight:600' }, p.seed != null ? `[${p.seed}]` : tournament.seedsKnown ? '[x2]' : ''),
-          h('span', { class: 'grow' }, h('div', { class: 'ellipsis', style: 'font-weight:600' }, p.country ? `${flag(p.country)} ` : null, p.name, p.entry ? h('span', { class: 'small' }, `  ${p.entry}`) : null),
+          h('span', { style: 'display:inline-block;min-width:38px;font-weight:600' }, entryTag(p)),
+          h('span', { class: 'grow' }, h('div', { class: 'ellipsis', style: 'font-weight:600' }, p.country ? `${flag(p.country)} ` : null, p.name),
             isCap ? h('div', { class: 'small tag-out' }, 'È il tuo capitano') : null),
+          tournament.seedsKnown && p.seed == null ? h('span', { class: 'pill' }, 'x2') : null,
           p.playerId === selectedId ? h('span', {}, '✓') : null);
       }),
       rows.length === 0 && h('div', { class: 'muted center' }, tournament.participants.length ? 'Nessun giocatore trovato' : 'Partecipanti non ancora disponibili'),
@@ -212,7 +213,7 @@ function viewTeam() {
       });
     } },
       h('span', { class: 'small ellipsis' }, `🎾 ${t.name}${t.location ? ` · ${t.location}` : ''}`),
-      p ? h('span', { class: 'name ellipsis' }, p.name, (p.seed != null || p.entry || p.underdog) ? h('span', { class: 'small' }, `  ${p.seed != null ? `[${p.seed}]` : p.underdog ? '[x2]' : ''}${p.entry ? ` ${p.entry}` : ''}`) : null) : h('span', {}, open ? '+ Scegli un giocatore' : '—'));
+      p ? h('span', { class: 'name ellipsis' }, p.name, entryTag(p) ? h('span', { class: 'small' }, `  ${entryTag(p)}`) : null, p.underdog ? h('span', { class: 'pill', style: 'margin-left:6px' }, 'x2') : null) : h('span', {}, open ? '+ Scegli un giocatore' : '—'));
   });
   for (const p of orphans) cards.push(h('div', { class: 'slot' }, h('span', { class: 'small tag-out' }, 'Torneo non più disponibile'), h('span', { class: 'name ellipsis' }, p.name)));
 
