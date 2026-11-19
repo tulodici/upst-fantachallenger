@@ -70,6 +70,17 @@ function rulesContent() {
     h('li', {}, 'Le informazioni sui tabelloni sono aggiornate solo agli orari di importazione e possono essere incomplete per qualificati e lucky loser.'),
   );
 }
+// Regolamento breve della schermata di benvenuto.
+function regolamentoBreve() {
+  const li = (title, text) => h('li', {}, h('b', {}, `${title} `), text);
+  return h('ol', { class: 'rules' },
+    li('Scegli il capitano.', 'All’iscrizione scegli un giocatore fuori dalla top-200 ATP. Resterà nella tua squadra per tutta la stagione e i suoi punti valgono ×3.'),
+    li('Ogni settimana scegli un giocatore per torneo.', 'Per ogni torneo Challenger in programma scegli un partecipante su cui puntare.'),
+    li('Bonus Underdog.', 'Se scegli un giocatore che non è testa di serie (riquadro x2) i punti che ottiene valgono x2.'),
+    li('Finestra di scelta.', 'Le scelte possono essere fatte da lunedì alle 00:01 a martedì alle 15:00 (ora italiana). Poi la rosa sarà congelata fino alla settimana successiva.'),
+    li('Distribuzione punti.', 'Vincitore 10, Finalista 5, Semifinalista 2.'),
+  );
+}
 function openRules() {
   const back = h('div', { class: 'sheet-back', onClick: (e) => e.target === back && back.remove() },
     h('div', { class: 'sheet' },
@@ -144,7 +155,7 @@ function viewWelcome() {
   const st = S.state;
   const closed = !st.window.open;
   let chosen = null;
-  const chosenBox = h('div', { class: 'slot empty', style: 'min-height:64px' }, '+ Scegli il tuo capitano');
+  const chosenBox = h('div', { class: 'slot empty', style: 'min-height:64px' }, '+ Seleziona il tuo Capitano');
   const go = h('button', { class: 'btn', disabled: true }, 'Conferma e inizia');
 
   chosenBox.addEventListener('click', () => openPicker({
@@ -167,15 +178,13 @@ function viewWelcome() {
   });
 
   return h('div', { class: 'page' },
-    h('div', { class: 'hero' }, h('div', {}, h('div', { class: 'muted' }, 'Benvenuto in'), h('h1', {}, '🎾 upst-fantachallenger'))),
-    h('div', { class: 'card' }, h('p', { style: 'margin:0' }, 'Ogni settimana scegli un giocatore per ciascun torneo ATP Challenger e pronostichi chi andrà più avanti. Gioco gratuito, senza premi in denaro.')),
     closed && h('div', { class: 'notice' }, h('b', {}, 'Iscrizione a finestra chiusa. '),
       `La selezione della rosa è chiusa: finché non riapre${st.window.nextOpens ? ` (${fmtDateTime(st.window.nextOpens)})` : ''} segnerai solo con il capitano. Poi potrai comporre la rosa come tutti.`),
     !st.hasRanking && h('div', { class: 'notice' }, 'Il ranking non è ancora disponibile: riprova tra poco.'),
-    h('div', { class: 'card' }, h('h3', { style: 'margin-bottom:8px' }, '1. Scegli il capitano'), chosenBox,
-      h('p', { class: 'muted', style: 'margin-bottom:0' }, 'Fisso per tutta la stagione, punti x3, anche se la rosa è vuota.')),
+    h('div', { class: 'card' }, h('h3', { style: 'margin-bottom:8px' }, '1. Scegli il Capitano'), chosenBox,
+      h('p', { class: 'muted', style: 'margin-bottom:0' }, 'Il Capitano rimarrà nella tua squadra per tutta la stagione e riceverà punti moltiplicati x3, ma deve essere fuori dalla top-200 del ranking ATP attuale.')),
     go,
-    h('div', { class: 'card', style: 'margin-top:12px' }, h('h3', {}, 'Le regole in breve'), rulesContent()),
+    h('div', { class: 'card', style: 'margin-top:12px' }, h('h3', {}, 'Regolamento'), regolamentoBreve()),
   );
 }
 

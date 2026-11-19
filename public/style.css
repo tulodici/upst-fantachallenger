@@ -98,7 +98,7 @@ details summary { cursor: pointer; color: var(--link); font-size: 14px; margin-t
 .spin { width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--border); border-top-color: var(--accent); animation: r .8s linear infinite; margin: 30px auto; }
 @keyframes r { to { transform: rotate(360deg); } }
 .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(80px + env(safe-area-inset-bottom)); background: #222; color: #fff; padding: 10px 14px; border-radius: 12px; font-size: 14px; z-index: 50; max-width: 90%; }
-ul.rules { padding-left: 18px; margin: 8px 0; } ul.rules li { margin: 6px 0; }
+ul.rules, ol.rules { padding-left: 20px; margin: 8px 0; } ul.rules li, ol.rules li { margin: 6px 0; }
 
 .chips { display: flex; gap: 6px; margin-top: 10px; overflow-x: auto; }
 .chip { border: 1px solid var(--border); background: var(--bg2); border-radius: 999px; padding: 5px 12px; font-size: 13px; white-space: nowrap; cursor: pointer; }
