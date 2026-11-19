@@ -113,6 +113,7 @@ async function openTournamentPicker({ tournament, selectedId, captainId, onPick,
   const back = h('div', { class: 'sheet-back', onClick: (e) => e.target === back && back.remove() });
   const list = h('div', { class: 'list' });
   const search = h('input', { type: 'search', placeholder: 'Cerca un giocatore…', autocomplete: 'off' });
+  const hint = tournament.seedsKnown ? h('div', { class: 'small', style: 'margin-top:6px' }, '[x2] = non testa di serie: se arriva a podio i suoi punti valgono il doppio (Bonus Underdog).') : null;
   function paint() {
     const q = search.value.trim().toLowerCase();
     const rows = tournament.participants.filter((p) => !q || p.name.toLowerCase().includes(q) || (p.country ?? '').toLowerCase() === q);
@@ -121,8 +122,8 @@ async function openTournamentPicker({ tournament, selectedId, captainId, onPick,
       ...rows.map((p) => {
         const isCap = p.playerId === captainId;
         return h('button', { class: `item ${p.playerId === selectedId ? 'sel' : ''}`, disabled: isCap, onClick: () => { back.remove(); onPick(p); } },
-          h('span', { style: 'display:inline-block;min-width:38px;font-weight:600' }, entryTag(p)),
-          h('span', { class: 'grow' }, h('div', { class: 'ellipsis', style: 'font-weight:600' }, p.country ? `${flag(p.country)} ` : null, p.name),
+          h('span', { style: 'display:inline-block;min-width:44px;font-weight:600' }, p.seed != null ? `[${p.seed}]` : tournament.seedsKnown ? '[x2]' : ''),
+          h('span', { class: 'grow' }, h('div', { class: 'ellipsis', style: 'font-weight:600' }, p.country ? `${flag(p.country)} ` : null, p.name, p.entry ? h('span', { class: 'small' }, `  ${p.entry}`) : null),
             isCap ? h('div', { class: 'small tag-out' }, 'È il tuo capitano') : null),
           p.playerId === selectedId ? h('span', {}, '✓') : null);
       }),
@@ -131,7 +132,7 @@ async function openTournamentPicker({ tournament, selectedId, captainId, onPick,
   }
   search.addEventListener('input', paint);
   back.append(h('div', { class: 'sheet' },
-    h('header', {}, h('div', { class: 'row spread' }, h('h2', { class: 'ellipsis' }, tournament.name), h('button', { class: 'link', onClick: () => back.remove() }, 'Annulla')), search),
+    h('header', {}, h('div', { class: 'row spread' }, h('h2', { class: 'ellipsis' }, tournament.name), h('button', { class: 'link', onClick: () => back.remove() }, 'Annulla')), search, hint),
     list));
   document.body.append(back);
   paint();
@@ -150,7 +151,7 @@ function viewWelcome() {
     onPick: (p) => {
       chosen = p;
       chosenBox.className = 'slot captain';
-      chosenBox.replaceChildren(h('span', { class: 'badge', style: 'align-self:flex-start' }, 'Capitano ×2'), h('span', { class: 'name' }, p.name), h('span', { class: 'small' }, `#${p.pos}${p.country ? ` · ${flag(p.country)}` : ''}`));
+      chosenBox.replaceChildren(h('span', { class: 'badge', style: 'align-self:flex-start' }, 'Capitano ×3'), h('span', { class: 'name' }, p.name), h('span', { class: 'small' }, `#${p.pos}${p.country ? ` · ${flag(p.country)}` : ''}`));
       go.disabled = false;
     },
   }));
@@ -211,7 +212,7 @@ function viewTeam() {
       });
     } },
       h('span', { class: 'small ellipsis' }, `🎾 ${t.name}${t.location ? ` · ${t.location}` : ''}`),
-      p ? h('span', { class: 'name ellipsis' }, p.name, entryTag(p) ? h('span', { class: 'small' }, `  ${entryTag(p)}`) : null) : h('span', {}, open ? '+ Scegli un giocatore' : '—'));
+      p ? h('span', { class: 'name ellipsis' }, p.name, (p.seed != null || p.entry || p.underdog) ? h('span', { class: 'small' }, `  ${p.seed != null ? `[${p.seed}]` : p.underdog ? '[x2]' : ''}${p.entry ? ` ${p.entry}` : ''}`) : null) : h('span', {}, open ? '+ Scegli un giocatore' : '—'));
   });
   for (const p of orphans) cards.push(h('div', { class: 'slot' }, h('span', { class: 'small tag-out' }, 'Torneo non più disponibile'), h('span', { class: 'name ellipsis' }, p.name)));
 
@@ -228,7 +229,7 @@ function viewTeam() {
     st.captainOnlyNotice && h('div', { class: 'notice' }, h('b', {}, 'Stai segnando solo con il capitano. '),
       `Ti sei iscritto a finestra chiusa: la rosa si potrà comporre dalla prossima apertura${st.window.nextOpens ? ` (${fmtDateTime(st.window.nextOpens)})` : ''}.`), // RG-11
         cap && h('div', { class: 'card captain' },
-      h('div', { class: 'row spread' }, h('span', { class: 'badge' }, 'Capitano ×2'), h('span', { class: 'small' }, 'fisso per la stagione')),
+      h('div', { class: 'row spread' }, h('span', { class: 'badge' }, 'Capitano ×3'), h('span', { class: 'small' }, 'fisso per la stagione')),
       h('div', { style: 'font-weight:700;font-size:18px;margin-top:6px' }, cap.name),
       h('div', { class: 'small' }, [cap.pos ? `#${cap.pos}` : 'fuori dal ranking', cap.country ? flag(cap.country) : null].filter(Boolean).join(' · '))),
     h('div', { class: 'row spread', style: 'margin:4px 2px 8px' }, h('h3', {}, 'Rosa'), h('span', { class: 'muted' }, `${roster.length}/${tournaments.length} tornei`)),

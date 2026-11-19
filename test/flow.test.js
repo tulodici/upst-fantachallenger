@@ -306,6 +306,9 @@ test('bonus underdog x2: solo per giocatori senza testa di serie, non cumulabile
   h.at('2026-11-22', 9, 0);
   await h.core.runJob('draws', '2026-11-23');
   h.at('2026-11-24', 10, 0);
+  const opt = (await h.core.pickOptions(await h.core.context()))[0];
+  assert.equal(opt.seedsKnown, true); // la lista di scelta puo' marcare gli underdog [x2]
+  assert.equal(opt.participants.find((p) => p.playerId === 'p302').seed, null);
   const s1 = await h.core.register({ telegramId: '50', teamName: 'Favorito', captainId: 'p700' });
   const s2 = await h.core.register({ telegramId: '51', teamName: 'Underdog', captainId: 'p701' });
   const s3 = await h.core.register({ telegramId: '52', teamName: 'Capitano', captainId: 'p302' });

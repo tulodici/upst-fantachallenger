@@ -74,7 +74,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
   async function pickOptions(ctx) {
     const ts = await tournamentsWithPeople(`week_start = ? AND status <> 'cancelled'`, [ctx.weekStart]);
     await attachParticipants(ts);
-    return ts.map((t) => ({ id: t.id, name: t.name, location: t.location, participants: t.participants }));
+    return ts.map((t) => ({ id: t.id, name: t.name, location: t.location, seedsKnown: t.seedsKnown, participants: t.participants }));
   }
 
   // ---------------------------------------------------------------- utenti
@@ -125,7 +125,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     const players = ids.map((id) => {
       const w = where.get(id);
       const base = byId.get(id) ?? { id, name: w?.p.name ?? `Giocatore ${id}`, country: w?.p.country ?? null };
-      return { ...base, pos: pos.get(id) ?? null, tournamentId: w?.t.id ?? null, tournament: w?.t.name ?? null, seed: w?.p.seed ?? null, entry: w?.p.entry ?? null };
+      return { ...base, pos: pos.get(id) ?? null, tournamentId: w?.t.id ?? null, tournament: w?.t.name ?? null, seed: w?.p.seed ?? null, entry: w?.p.entry ?? null, underdog: Boolean(w?.t.seedsKnown && w.p.seed == null) };
     });
     return { ids, players, status: row.status };
   }
@@ -620,6 +620,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
       const ranked = (p) => pos.get(p.playerId) ?? 99999;
       t.participants = [...map.values()].map((p) => ({ ...p, pos: pos.get(p.playerId) ?? null })).sort((a, b) =>
         group(a) - group(b) || (group(a) === 0 ? a.seed - b.seed : 0) || ranked(a) - ranked(b) || a.name.localeCompare(b.name));
+      t.seedsKnown = Boolean(bracket) && [...map.values()].some((p) => p.seed != null); // senza teste di serie note non si puo' parlare di underdog
       delete t.draw; delete t.results;
     }
   }
