@@ -361,7 +361,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     const main = head({ v: 'Capitano', s: STYLE.header });
     main[0][0] = { v: 'UPST', s: STYLE.bold };
     main[1][0] = { v: 'FantaChallenger', s: STYLE.bold };
-    const legend = [['SF', 2, '- Un giocatore per torneo'], ['SF', 2, '- Non sostituibile: il capitano'], ['F', 5, '- Capitano dal 201° al 900° del ranking'], ['W', 10, '- Capitano x3 (verde); Underdog x2 (non testa di serie)']];
+    const legend = [['SF', 2, '- Un giocatore per torneo (scelta settimanale)'], ['SF', 2, '- Capitano (verde): fisso, punti x3'], ['F', 5, '- Capitano: fuori dalla top-200 ATP'], ['W', 10, '- [x2] = Underdog (non testa di serie): punti x2']];
     const reachedRows = [['semifinalist', 0], ['semifinalist', 1], ['finalist', 0], ['winner', 0]];
     legend.forEach(([code, points, note], i) => {
       main.push([{ v: code, s: STYLE.center }, { v: points, s: STYLE.center }, note,
@@ -374,7 +374,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
         { v: u.team_name, s: STYLE.bold },
         { v: table[i].total, f: `Detailed_Scores!B${r}`, s: STYLE.center },
         { v: nameOf(u.captain_id), s: STYLE.captain },
-        ...tournaments.map((t) => ({ v: picks.has(t.id) ? nameOf(picks.get(t.id)) : '', s: medalStyle(medal.get(t.id), false) })),
+        ...tournaments.map((t) => ({ v: picks.has(t.id) ? `${nameOf(picks.get(t.id))}${seeds.isUnderdog(t.id, picks.get(t.id)) ? ' [x2]' : ''}` : '', s: medalStyle(medal.get(t.id), false) })),
       ]);
     });
 
