@@ -74,6 +74,11 @@ export function createBot({ token, adminIds = [], appUrl, log = console }) {
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       return ok ? undefined : sendMessage(chatId, '❌ Invio del file non riuscito, riprova.');
     }
+    if (cmd === '/reset') { // elimina la TUA squadra (collaudo): alla prossima apertura rivedi l'iscrizione
+      const r = await core.deleteTeam(from);
+      await core.audit(from, 'bot:reset', r);
+      return sendMessage(chatId, r.removed ? '🧹 La tua squadra è stata eliminata. Riapri il Mini App per rifare l\'iscrizione.' : 'Non hai ancora una squadra.', { openApp: Boolean(r.removed) });
+    }
     if (cmd === '/demo') {
       if (args[0] === 'off') {
         const r = await core.removeDemoTeams();

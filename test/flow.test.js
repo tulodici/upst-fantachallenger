@@ -280,3 +280,16 @@ test('squadre fittizie: 20 squadre con scelte e punti, rimovibili', async () => 
   assert.deepEqual(await h.core.removeDemoTeams(), { removed: 20 });
   assert.equal((await h.core.standings()).length, 0);
 });
+
+test('deleteTeam: elimina squadra, rosa e punti di un solo utente', async () => {
+  const h = await makeCore();
+  await bootstrap(h);
+  h.at(W, 9, 0);
+  const a = await h.core.register({ telegramId: '40', teamName: 'A', captainId: 'p300' });
+  await h.core.register({ telegramId: '41', teamName: 'B', captainId: 'p301' });
+  assert.deepEqual(await h.core.deleteTeam('40'), { removed: 1 });
+  assert.equal(await h.core.findUser('40'), undefined);
+  assert.ok(await h.core.findUser('41'));
+  assert.deepEqual(await h.core.deleteTeam('40'), { removed: 0 });
+  assert.ok(a);
+});

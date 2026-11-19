@@ -385,6 +385,18 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     return { rows: users.length, tournaments: tournaments.length, xlsx };
   }
 
+  /** Elimina la squadra di un utente (con scelte, snapshot e punti): per ripetere l'iscrizione da zero durante i collaudi. */
+  async function deleteTeam(telegramId) {
+    const u = await db.get('SELECT id FROM users WHERE telegram_id = ?', [String(telegramId)]);
+    if (!u) return { removed: 0 };
+    await db.tx(async (t) => {
+      for (const table of ['points', 'roster_snapshots', 'rosters']) await t.run(`DELETE FROM ${table} WHERE user_id = ?`, [u.id]);
+      await t.run('DELETE FROM users WHERE id = ?', [u.id]);
+    });
+    await recomputePoints();
+    return { removed: 1 };
+  }
+
   // ---------------------------------------------------------------- squadre fittizie per il collaudo (/demo)
 
   const DEMO_PREFIX = 'demo-';
@@ -907,6 +919,6 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     context, listPlayers, pickOptions, register, findUser, touchTeamName, saveRoster, getState, snapshotWeek, ensureSnapshots,
     recomputePoints, standings, completedTournaments, inProgressTournaments, nextWeekTournaments,
     importRanking, importDraws, importResults, sendReminders, dueJobs, runJob, defaultKey, tick,
-    adminSetResults, adminStatus, adminPicksReport, seedDemoTeams, removeDemoTeams, audit, windowPayload, dayOfWeekOf, reconcileProvider,
+    adminSetResults, adminStatus, adminPicksReport, seedDemoTeams, removeDemoTeams, deleteTeam, audit, windowPayload, dayOfWeekOf, reconcileProvider,
   };
 }
