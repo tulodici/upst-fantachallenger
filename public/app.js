@@ -73,8 +73,7 @@ function openRules() {
   const back = h('div', { class: 'sheet-back', onClick: (e) => e.target === back && back.remove() },
     h('div', { class: 'sheet' },
       h('header', {}, h('div', { class: 'row spread' }, h('h2', {}, 'Regolamento'), h('button', { class: 'link', onClick: () => back.remove() }, 'Chiudi'))),
-      h('div', { class: 'list', style: 'padding:0 16px 16px' }, regolamento(),
-        h('p', { class: 'muted' }, h('a', { href: '/privacy', target: '_blank', class: 'link' }, 'Informativa sulla privacy')))));
+      h('div', { class: 'list', style: 'padding:0 16px 16px' }, regolamento())));
   document.body.append(back);
 }
 
