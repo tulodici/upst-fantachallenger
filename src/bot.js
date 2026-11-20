@@ -56,6 +56,17 @@ export function createBot({ token, adminIds = [], appUrl, log = console }) {
     if (cmd === '/start') {
       return sendMessage(chatId, '<b>Benvenuto nel FantaChallenger di Un Podcast Sul Tennis</b>\n\nDimostra la tua conoscenza del tennis che conta!\n\nOgni settimana pronostica i vincitori dei tornei Challenger in corso.', { openApp: true, html: true });
     }
+    if (cmd === '/help') {
+      return sendMessage(chatId, [
+        '<b>Regolamento</b>',
+        '',
+        '1. <b>Scegli il Capitano.</b> Il Capitano deve essere un giocatore fuori dalla top-200 ATP e resterà nella tua squadra per tutta la stagione. I suoi punti sono moltiplicati <b>×3</b>.',
+        '2. <b>Ogni settimana scegli un giocatore per torneo.</b> Per ogni torneo Challenger in programma scegli un partecipante su cui puntare.',
+        '3. <b>Bonus Underdog.</b> Se scegli un giocatore che non è testa di serie (riquadro x2) i punti che ottiene saranno moltiplicati <b>x2</b>.',
+        '4. <b>Finestra di scelta.</b> Puoi selezionare i tuoi giocatori da lunedì alle 00:01 fino a martedì alle 15:00 (ora italiana). Poi la rosa sarà congelata fino alla settimana successiva.',
+        '5. <b>Distribuzione punti.</b> Vincitore <b>10</b>, Finalista <b>5</b>, Semifinalista <b>2</b>.',
+      ].join('\n'), { openApp: true, html: true });
+    }
     if (!isAdmin(from)) return;
     if (cmd === '/quota') {
       const q = await core.adminStatus();
