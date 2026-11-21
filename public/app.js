@@ -223,8 +223,7 @@ function viewTeam() {
         open ? h('div', {}, h('b', {}, 'Selezione aperta'), ` · chiude ${fmtDateTime(st.window.closes)}`)
           : h('div', {}, h('b', {}, 'Selezione chiusa'), ` · chiusa ${fmtDateTime(st.window.closes)}`, st.window.nextOpens ? h('div', { class: 'small' }, `Riapre ${fmtDateTime(st.window.nextOpens)}`) : null)),
       h('button', { class: 'link', onClick: openRules }, 'Regole')),
-    st.captainOnlyNotice && h('div', { class: 'notice' }, h('b', {}, 'Stai segnando solo con il capitano. '),
-      `Ti sei iscritto a finestra chiusa: la rosa si potrà comporre dalla prossima apertura${st.window.nextOpens ? ` (${fmtDateTime(st.window.nextOpens)})` : ''}.`), // RG-11
+    st.captainOnlyNotice && h('div', { class: 'notice' }, 'Ti sei iscritto mentre la finestra di scelta è chiusa. La rosa si potrà comporre dalla prossima apertura.'), // RG-11
         cap && h('div', { class: 'card captain' },
       h('div', { class: 'row spread' }, h('span', { class: 'badge' }, 'Capitano ×3'), h('span', { class: 'small' }, 'fisso per la stagione')),
       h('div', { style: 'font-weight:700;font-size:18px;margin-top:6px' }, cap.name),
