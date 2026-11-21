@@ -206,6 +206,13 @@ test('RT-11: quota API mensile, allarme all\'80% e blocco', async () => {
   await api.request('e5', async () => 5);
   await assert.rejects(api.request('e6', async () => 6), QuotaExhaustedError);
   assert.equal((await api.status()).remaining, 0);
+  // /quota reset: contatore a zero, chiamate di nuovo possibili e allarme riarmato
+  const r = await api.reset();
+  assert.equal(r.cleared, 5);
+  assert.equal((await api.status()).used, 0);
+  await api.request('e7', async () => 7);
+  for (let i = 0; i < 3; i++) await api.request(`f${i}`, async () => i);
+  assert.equal(h.sent.filter((m) => m.admin).length, 2);
 });
 
 test('RT-27: retry con backoff, 4xx non ritentati', async () => {

@@ -68,6 +68,11 @@ export function createBot({ token, adminIds = [], appUrl, log = console }) {
       ].join('\n'), { openApp: true, html: true });
     }
     if (!isAdmin(from)) return;
+    if (cmd === '/quota' && args[0] === 'reset') {
+      const r = await core.resetQuota(from);
+      const q = await core.adminStatus();
+      return sendMessage(chatId, `Contatore API di ${r.month} azzerato (cancellate ${r.cleared} chiamate). Quota: ${q.quota.used}/${q.quota.limit}.`);
+    }
     if (cmd === '/quota') {
       const q = await core.adminStatus();
       return sendMessage(chatId, `Quota API ${q.quota.month}: ${q.quota.used}/${q.quota.limit} (restano ${q.quota.remaining}).`);

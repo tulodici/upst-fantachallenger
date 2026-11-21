@@ -943,6 +943,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
   return {
     context, listPlayers, pickOptions, register, findUser, touchTeamName, saveRoster, getState, snapshotWeek, ensureSnapshots,
     recomputePoints, standings, completedTournaments, inProgressTournaments, nextWeekTournaments,
+    resetQuota: async (actor) => { const r = await api.reset(); await audit(actor, 'admin:quota-reset', r); return r; },
     importRanking, importDraws, importResults, sendReminders, dueJobs, runJob, defaultKey, tick,
     adminSetResults, adminStatus, adminPicksReport, seedDemoTeams, removeDemoTeams, deleteTeam, audit, windowPayload, dayOfWeekOf, reconcileProvider,
   };

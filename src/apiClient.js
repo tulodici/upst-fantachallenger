@@ -59,5 +59,14 @@ export function createApiClient({ db, clock, notifyAdmins, limit = 150, alarmRat
     }
   }
 
-  return { request, status };
+  /** Azzera il contatore del mese corrente (es. dopo il cambio della chiave API) e riarma l'allarme. */
+  async function reset() {
+    const ym = monthKey(clock());
+    const before = await used();
+    await db.run('DELETE FROM api_calls WHERE ym = ?', [ym]);
+    await db.run('DELETE FROM meta WHERE k = ?', [`quota_alarm_${ym}`]);
+    return { month: ym, cleared: before };
+  }
+
+  return { request, status, reset };
 }

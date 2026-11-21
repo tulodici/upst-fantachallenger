@@ -37,7 +37,7 @@ npm test      # test su regole, fuso orario, HMAC, flusso settimanale, quota API
 |---|---|---|
 | `/start` | tutti | Messaggio di benvenuto e pulsante per aprire l'app |
 | `/help` | tutti | Mostra il regolamento |
-| `/quota` | admin | Chiamate API usate nel mese |
+| `/quota` · `/quota reset` | admin | Chiamate API usate nel mese; `reset` azzera il contatore (es. dopo il cambio chiave) |
 | `/stato` | admin | Provider, utenti, ultimi job |
 | `/import <job> [lunedì]` | admin | Esegue `ranking`, `draws`, `results`… (costa chiamate API) |
 | `/ricalcola` | admin | Ricalcola tutti i punti |
