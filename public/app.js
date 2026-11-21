@@ -165,8 +165,7 @@ function viewWelcome() {
   });
 
   return h('div', { class: 'page' },
-    closed && h('div', { class: 'notice' }, h('b', {}, 'Iscrizione a finestra chiusa. '),
-      `La selezione della rosa è chiusa: finché non riapre${st.window.nextOpens ? ` (${fmtDateTime(st.window.nextOpens)})` : ''} segnerai solo con il capitano. Poi potrai comporre la rosa come tutti.`),
+    closed && h('div', { class: 'notice' }, 'Ti sei iscritto mentre la finestra di scelta è chiusa. La rosa si potrà comporre dalla prossima apertura.'),
     !st.hasRanking && h('div', { class: 'notice' }, 'Il ranking non è ancora disponibile: riprova tra poco.'),
     h('div', { class: 'card' }, h('h3', { style: 'margin-bottom:8px' }, '1. Scegli il Capitano'), chosenBox,
       h('p', { class: 'muted', style: 'margin-bottom:0' }, 'Il Capitano rimarrà nella tua squadra per tutta la stagione e riceverà punti moltiplicati x3, ma deve essere fuori dalla top-200 del ranking ATP attuale.')),
