@@ -358,3 +358,16 @@ test('rosa in bozza di una settimana gia\' chiusa: viene congelata e i punti arr
   assert.ok(pts.Late >= 10);
   assert.equal((await core.snapshotWeek(W)).created, false); // di nuovo idempotente
 });
+
+test('deleteAllTeams elimina squadre, rose e punti ma lascia tornei e ranking', async () => {
+  const h = await makeCore();
+  const { core, db } = h;
+  await bootstrap(h);
+  h.at(W, 10, 0);
+  await core.register({ telegramId: '1', teamName: 'Alice', captainId: 'p300' });
+  await core.register({ telegramId: '2', teamName: 'Bob', captainId: 'p500' });
+  assert.equal((await core.deleteAllTeams('admin')).removed, 2);
+  for (const t of ['users', 'rosters', 'roster_snapshots', 'points']) assert.equal((await db.get(`SELECT COUNT(*) AS n FROM ${t}`)).n, 0);
+  assert.ok((await db.get('SELECT COUNT(*) AS n FROM tournaments')).n > 0);
+  assert.ok((await db.get('SELECT COUNT(*) AS n FROM rankings')).n > 0);
+});

@@ -90,6 +90,11 @@ export function createBot({ token, adminIds = [], appUrl, log = console }) {
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       return ok ? undefined : sendMessage(chatId, '❌ Invio del file non riuscito, riprova.');
     }
+    if (cmd === '/svuota') { // lancio: elimina TUTTE le squadre; richiede la conferma esplicita
+      if (args[0] !== 'conferma') return sendMessage(chatId, '⚠️ Questo elimina definitivamente TUTTE le squadre (iscritti, capitani, rose e punti).\nPer procedere scrivi: /svuota conferma');
+      const r = await core.deleteAllTeams(from);
+      return sendMessage(chatId, `🧹 Eliminate ${r.removed} squadre. Ogni utente dovrà iscriversi di nuovo.`);
+    }
     if (cmd === '/reset') { // elimina la TUA squadra (collaudo): alla prossima apertura rivedi l'iscrizione
       const r = await core.deleteTeam(from);
       await core.audit(from, 'bot:reset', r);

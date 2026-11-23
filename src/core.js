@@ -422,6 +422,16 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     return { removed: 1 };
   }
 
+  /** Lancio: elimina TUTTE le squadre (iscritti, rose, snapshot, punti). Tornei, giocatori, risultati e quota API restano. */
+  async function deleteAllTeams(actor) {
+    const n = (await db.get('SELECT COUNT(*) AS n FROM users')).n;
+    await db.tx(async (t) => {
+      for (const table of ['points', 'roster_snapshots', 'rosters', 'users']) await t.run(`DELETE FROM ${table}`);
+    });
+    await audit(actor, 'admin:delete-all-teams', { removed: n });
+    return { removed: n };
+  }
+
   // ---------------------------------------------------------------- squadre fittizie per il collaudo (/demo)
 
   const DEMO_PREFIX = 'demo-';
@@ -948,6 +958,6 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     recomputePoints, standings, completedTournaments, inProgressTournaments, nextWeekTournaments,
     resetQuota: async (actor) => { const r = await api.reset(); await audit(actor, 'admin:quota-reset', r); return r; },
     importRanking, importDraws, importResults, sendReminders, dueJobs, runJob, defaultKey, tick,
-    adminSetResults, adminStatus, adminPicksReport, seedDemoTeams, removeDemoTeams, deleteTeam, audit, windowPayload, dayOfWeekOf, reconcileProvider,
+    adminSetResults, adminStatus, adminPicksReport, seedDemoTeams, removeDemoTeams, deleteTeam, deleteAllTeams, audit, windowPayload, dayOfWeekOf, reconcileProvider,
   };
 }

@@ -44,6 +44,7 @@ npm test      # test su regole, fuso orario, HMAC, flusso settimanale, quota API
 | `/scelte` | admin | Invia l'Excel con le scelte e i punti di tutte le squadre |
 | `/demo` · `/demo off` | admin | Crea o rimuove 20 squadre fittizie |
 | `/reset` | admin | Elimina la propria squadra (collaudo) |
+| `/svuota` | admin | Elimina TUTTE le squadre (lancio); chiede conferma con `/svuota conferma` |
 
 ## Job e budget API
 
