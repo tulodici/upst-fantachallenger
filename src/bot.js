@@ -60,7 +60,7 @@ export function createBot({ token, adminIds = [], appUrl, log = console }) {
       return sendMessage(chatId, [
         '<b>Regolamento</b>',
         '',
-        '1. <b>Scegli il Capitano.</b> Il Capitano deve essere un giocatore fuori dalla top-200 ATP e resterà nella tua squadra per tutta la stagione. I suoi punti sono moltiplicati <b>×3</b>.',
+        '1. <b>Scegli il Capitano.</b> Il Capitano deve essere un giocatore fuori dalla top-200 ATP e resterà nella tua squadra per <b>12 settimane</b>. I suoi punti sono moltiplicati <b>×3</b>. Al termine potrai sceglierne un altro.',
         '2. <b>Ogni settimana scegli un giocatore per torneo.</b> Per ogni torneo Challenger in programma scegli un partecipante su cui puntare.',
         '3. <b>Bonus Underdog.</b> Se scegli un giocatore che non è testa di serie (riquadro x2) i punti che ottiene saranno moltiplicati <b>x2</b>.',
         '4. <b>Finestra di scelta.</b> Puoi selezionare i tuoi giocatori da lunedì alle 00:01 fino a martedì alle 15:00 (ora italiana). Poi la rosa sarà congelata fino alla settimana successiva.',

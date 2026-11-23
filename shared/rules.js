@@ -19,6 +19,8 @@ export function inPool(pos) {
   return Number.isInteger(pos) && pos >= 1 && pos <= POOL_SIZE;
 }
 
+export const CAPTAIN_WEEKS = 12; // durata del mandato del Capitano, dalla settimana di inizio
+
 export function isCaptainEligible(pos) {
   return Number.isInteger(pos) && pos >= CAPTAIN_MIN_POS && pos <= CAPTAIN_MAX_POS;
 }

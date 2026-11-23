@@ -371,3 +371,49 @@ test('deleteAllTeams elimina squadre, rose e punti ma lascia tornei e ranking', 
   assert.ok((await db.get('SELECT COUNT(*) AS n FROM tournaments')).n > 0);
   assert.ok((await db.get('SELECT COUNT(*) AS n FROM rankings')).n > 0);
 });
+
+test('Capitano: mandato di 12 settimane, poi rinnovo (anche a finestra chiusa)', async () => {
+  const h = await makeCore();
+  const { core, db } = h;
+  await bootstrap(h);
+  h.at(W, 10, 0);
+  const a = await core.register({ telegramId: '1', teamName: 'Alice', captainId: 'p300' });
+  const b = await core.register({ telegramId: '2', teamName: 'Bob', captainId: 'p500' });
+  const addT = async (id, week) => {
+    await db.run(`INSERT INTO tournaments (id, name, week_start, status, updated_at) VALUES (?, ?, ?, 'concluded', ?)`, [id, `T${id}`, week, new Date().toISOString()]);
+    await db.run(`INSERT INTO tournament_results (tournament_id, player_id, reached) VALUES (?, 'p300', 'winner')`, [id]);
+  };
+  await addT('t11', '2027-02-08'); // 11a settimana dopo l'iscrizione: ancora nel mandato (W + 77 giorni)
+  await addT('t12', '2027-02-15'); // fuori dal mandato (W + 84 giorni)
+  await core.recomputePoints();
+  const pts = async () => Object.fromEntries((await core.standings()).map((r) => [r.teamName, r.points]));
+  assert.equal((await pts()).Alice, 30);
+
+  h.at('2027-02-08', 10, 0);
+  let st = await core.getState(a);
+  assert.equal(st.captainExpired, false);
+  assert.equal(st.captain.weeksLeft, 1);
+  await assert.rejects(core.changeCaptain(a, 'p300'), (e) => e.code === 'CAPTAIN_ACTIVE');
+
+  // scaduto, finestra aperta: il nuovo mandato parte subito
+  h.at('2027-02-15', 10, 0);
+  st = await core.getState(a);
+  assert.equal(st.captainExpired, true);
+  assert.equal(st.captain, null);
+  await assert.rejects(core.changeCaptain(a, 'p150'), (e) => e.code === 'CAPTAIN_NOT_ELIGIBLE');
+  await core.changeCaptain(a, 'p300');
+  assert.equal((await pts()).Alice, 60); // la settimana 12 ora e' coperta dal nuovo mandato
+  assert.equal((await core.getState(a)).captain.weeksLeft, 12);
+
+  // scaduto, finestra chiusa: il nuovo mandato parte dalla settimana dopo (niente punti sui risultati gia' noti)
+  h.at('2027-02-16', 16, 0);
+  assert.equal((await core.context()).open, false);
+  const b2 = await core.getState(b);
+  assert.equal(b2.captainExpired, true);
+  await core.changeCaptain(b, 'p300');
+  assert.equal((await pts()).Bob, 0); // t11 e t12 precedono il nuovo mandato (parte dal 22/2): nessun punto retroattivo
+  st = await core.getState(b);
+  assert.equal(st.captain, null);
+  assert.equal(st.captainUpcoming.startWeek, '2027-02-22');
+  assert.equal(st.captainExpired, false);
+});

@@ -33,6 +33,7 @@ async function api(path, opts = {}) {
 }
 
 const fmtDateTime = (iso) => new Date(iso).toLocaleString('it-IT', { timeZone: 'Europe/Rome', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+const fmtDate = (ymd) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome', day: 'numeric', month: 'long' });
 const fmtDay = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('it-IT', { day: 'numeric', month: 'long', timeZone: 'UTC' });
 const posClass = (pos) => ({ top125: 't125', top200: 't200' }[tierOf(pos)] ?? '');
 
@@ -62,7 +63,7 @@ function regolamento() {
   const li = (title, ...parts) => h('li', {}, h('b', {}, `${title} `), ...parts);
   const b = (t) => h('b', {}, t);
   return h('ol', { class: 'rules' },
-    li('Scegli il Capitano.', 'Il Capitano deve essere un giocatore fuori dalla top-200 ATP e resterà nella tua squadra per tutta la stagione. I suoi punti sono moltiplicati ', b('×3'), '.'),
+    li('Scegli il Capitano.', 'Il Capitano deve essere un giocatore fuori dalla top-200 ATP e resterà nella tua squadra per ', b('12 settimane'), '. I suoi punti sono moltiplicati ', b('×3'), '. Al termine potrai sceglierne un altro.'),
     li('Ogni settimana scegli un giocatore per torneo.', 'Per ogni torneo Challenger in programma scegli un partecipante su cui puntare.'),
     li('Bonus Underdog.', 'Se scegli un giocatore che non è testa di serie (riquadro x2) i punti che ottiene saranno moltiplicati ', b('x2'), '.'),
     li('Finestra di scelta.', 'Puoi selezionare i tuoi giocatori da lunedì alle 00:01 fino a martedì alle 15:00 (ora italiana). Poi la rosa sarà congelata fino alla settimana successiva.'),
@@ -156,7 +157,7 @@ function viewWelcome() {
   }));
   go.addEventListener('click', async () => {
     if (!chosen) return;
-    if (!(await confirmDialog(`${chosen.name} sarà il tuo capitano per tutta la stagione e non potrà essere cambiato. Confermi?`))) return;
+    if (!(await confirmDialog(`${chosen.name} sarà il tuo capitano per 12 settimane e non potrà essere cambiato prima della scadenza. Confermi?`))) return;
     go.disabled = true;
     try {
       S.state = await api('/api/register', { method: 'POST', body: { captainId: chosen.id } });
@@ -168,7 +169,7 @@ function viewWelcome() {
     closed && h('div', { class: 'notice' }, 'Ti sei iscritto mentre la finestra di scelta è chiusa. La rosa si potrà comporre dalla prossima apertura.'),
     !st.hasRanking && h('div', { class: 'notice' }, 'Il ranking non è ancora disponibile: riprova tra poco.'),
     h('div', { class: 'card' }, h('h3', { style: 'margin-bottom:8px' }, '1. Scegli il Capitano'), chosenBox,
-      h('p', { class: 'muted', style: 'margin-bottom:0' }, 'Il Capitano rimarrà nella tua squadra per tutta la stagione e riceverà punti moltiplicati x3, ma deve essere fuori dalla top-200 del ranking ATP attuale.')),
+      h('p', { class: 'muted', style: 'margin-bottom:0' }, 'Il Capitano rimarrà nella tua squadra per 12 settimane e riceverà punti moltiplicati x3, ma deve essere fuori dalla top-200 del ranking ATP attuale.')),
     go,
     h('div', { class: 'card', style: 'margin-top:12px' }, h('h3', {}, 'Regolamento'), regolamento()),
   );
@@ -191,6 +192,15 @@ function viewTeam() {
       toast(e.code === 'WINDOW_CLOSED' ? 'La finestra è appena stata chiusa' : e.message);
       await loadState(); render();
     }
+  }
+  function renewCaptain() {
+    openPicker({
+      title: 'Scegli il nuovo capitano (201°–900°)', mode: 'captain',
+      onPick: async (p) => {
+        if (!(await confirmDialog(`${p.name} sarà il tuo capitano per ${st.captainWeeks} settimane e non potrà essere cambiato prima della scadenza. Confermi?`))) return;
+        try { S.state = await api('/api/captain', { method: 'PUT', body: { captainId: p.id } }); render(); } catch (e) { toast(e.message); }
+      },
+    });
   }
   const tournaments = st.tournaments ?? [];
   const pickOf = (t) => roster.find((p) => p.tournamentId === t.id);
@@ -223,8 +233,13 @@ function viewTeam() {
           : h('div', {}, h('b', {}, 'Selezione chiusa'), ` · chiusa ${fmtDateTime(st.window.closes)}`, st.window.nextOpens ? h('div', { class: 'small' }, `Riapre ${fmtDateTime(st.window.nextOpens)}`) : null)),
       h('button', { class: 'link', onClick: openRules }, 'Regole')),
     st.captainOnlyNotice && h('div', { class: 'notice' }, 'Ti sei iscritto mentre la finestra di scelta è chiusa. La rosa si potrà comporre dalla prossima apertura.'), // RG-11
-        cap && h('div', { class: 'card captain' },
-      h('div', { class: 'row spread' }, h('span', { class: 'badge' }, 'Capitano ×3'), h('span', { class: 'small' }, 'fisso per la stagione')),
+    st.captainExpired && h('div', { class: 'card captain' },
+      h('div', { class: 'row spread' }, h('span', { class: 'badge' }, 'Capitano ×3'), h('span', { class: 'small' }, 'scaduto')),
+      h('p', { style: 'margin:8px 0' }, `Il tuo Capitano è scaduto dopo ${st.captainWeeks} settimane. Scegline uno nuovo per tornare a segnare con i suoi punti ×3.`),
+      h('button', { class: 'btn', onClick: renewCaptain }, 'Scegli il nuovo Capitano')),
+    st.captainUpcoming && h('div', { class: 'notice' }, `Il tuo nuovo Capitano ${st.captainUpcoming.name} inizierà dalla settimana del ${fmtDate(st.captainUpcoming.startWeek)}.`),
+    cap && h('div', { class: 'card captain' },
+      h('div', { class: 'row spread' }, h('span', { class: 'badge' }, 'Capitano ×3'), h('span', { class: 'small' }, cap.weeksLeft === 1 ? 'ultima settimana' : `${cap.weeksLeft} settimane rimaste`)),
       h('div', { style: 'font-weight:700;font-size:18px;margin-top:6px' }, cap.name),
       h('div', { class: 'small' }, [cap.pos ? `#${cap.pos}` : 'fuori dal ranking', cap.country ? flag(cap.country) : null].filter(Boolean).join(' · '))),
     h('div', { class: 'row spread', style: 'margin:4px 2px 8px' }, h('h3', {}, 'Rosa'), h('span', { class: 'muted' }, `${roster.length}/${tournaments.length} tornei`)),

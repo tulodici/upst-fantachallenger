@@ -103,6 +103,11 @@ export async function createApp(config = loadConfig(), overrides = {}) {
         }
       }
 
+      if (p === '/api/captain' && m === 'PUT') {
+        const body = await readJson(req);
+        const user = await core.changeCaptain(auth.user, String(body.captainId ?? ''));
+        return send(res, 200, await core.getState(user));
+      }
       if (p === '/api/roster' && m === 'PUT') {
         const body = await readJson(req);
         const roster = await core.saveRoster(auth.user, body.playerIds);

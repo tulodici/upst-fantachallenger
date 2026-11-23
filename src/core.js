@@ -1,5 +1,5 @@
 import {
-  POOL_SIZE, isCaptainEligible, validatePicks, pointsFor, withPositions,
+  POOL_SIZE, CAPTAIN_WEEKS, isCaptainEligible, validatePicks, pointsFor, withPositions,
 } from '../shared/rules.js';
 import { addDays, dayOfWeekOf, mondayOf, romeParts, romeToUtc, windowOf, windowState } from './time.js';
 import { QuotaExhaustedError } from './apiClient.js';
@@ -90,6 +90,28 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     }
   }
 
+
+  // ---------------------------------------------------------------- mandati del Capitano (12 settimane)
+
+  const termEnd = (start) => addDays(start, CAPTAIN_WEEKS * 7); // primo lunedi' DOPO l'ultima settimana valida
+
+  /** Ogni utente ha almeno un mandato (iscrizione); utenti creati in altro modo (demo, vecchi dati) vengono allineati. */
+  async function ensureTerms() {
+    await db.run(`INSERT INTO captain_terms (user_id, player_id, start_week)
+                  SELECT id, captain_id, reg_week FROM users WHERE id NOT IN (SELECT user_id FROM captain_terms)`);
+  }
+  async function loadTerms() {
+    await ensureTerms();
+    const map = new Map();
+    for (const r of await db.all('SELECT user_id, player_id, start_week FROM captain_terms ORDER BY start_week')) {
+      if (!map.has(r.user_id)) map.set(r.user_id, []);
+      map.get(r.user_id).push(r);
+    }
+    return map;
+  }
+  /** Capitano in carica nella settimana `week` (null se nessun mandato la copre). */
+  const captainAt = (terms, week) => (terms ?? []).find((t) => t.start_week <= week && week < termEnd(t.start_week))?.player_id ?? null;
+
   async function register({ telegramId, teamName, captainId }) {
     if (await findUser(telegramId)) throw new AppError('ALREADY_REGISTERED', 'Sei già iscritto', 409);
     const ctx = await context();
@@ -107,7 +129,29 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
       if (await findUser(telegramId)) throw new AppError('ALREADY_REGISTERED', 'Sei già iscritto', 409);
       throw e;
     }
+    await ensureTerms();
     return findUser(telegramId);
+  }
+
+  /** Alla scadenza delle 12 settimane l'utente sceglie il nuovo Capitano (anche lo stesso). Vale dalla settimana in corso se la finestra e' aperta, altrimenti dalla prossima. */
+  async function changeCaptain(user, captainId) {
+    const terms = (await loadTerms()).get(user.id) ?? [];
+    const ctx = await context();
+    const last = terms[terms.length - 1];
+    if (last && termEnd(last.start_week) > ctx.weekStart) throw new AppError('CAPTAIN_ACTIVE', 'Il tuo Capitano è ancora in carica', 409);
+    const pos = (await refPositions(ctx, [captainId])).get(captainId);
+    if (!isCaptainEligible(pos)) throw new AppError('CAPTAIN_NOT_ELIGIBLE', 'Il capitano deve essere tra la 201ª e la 900ª posizione del ranking', 422);
+    const start = ctx.open ? ctx.weekStart : addDays(ctx.weekStart, 7);
+    if (start === ctx.weekStart && (await currentRoster(user, ctx)).ids.includes(captainId)) {
+      throw new AppError('CAPTAIN_IN_ROSTER', 'Questo giocatore è già nella tua rosa: toglilo prima dalla rosa', 422);
+    }
+    await db.tx(async (t) => {
+      await t.run('INSERT INTO captain_terms (user_id, player_id, start_week) VALUES (?, ?, ?)', [user.id, captainId, start]);
+      await t.run('UPDATE users SET captain_id = ? WHERE id = ?', [captainId, user.id]);
+    });
+    await audit(String(user.telegram_id), 'captain:change', { captainId, start });
+    await recomputePoints();
+    return findUser(user.telegram_id);
   }
 
   // ---------------------------------------------------------------- rosa
@@ -230,13 +274,9 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
          FROM tournament_results tr JOIN tournaments t ON t.id = tr.tournament_id
         WHERE t.status = 'concluded'`,
     );
-    const users = await db.all('SELECT id, captain_id, reg_week FROM users');
+    const users = await db.all('SELECT id FROM users');
+    const terms = await loadTerms();
     const snaps = await db.all('SELECT user_id, week_start, player_id FROM roster_snapshots');
-    const captainUsers = new Map();
-    for (const u of users) {
-      if (!captainUsers.has(u.captain_id)) captainUsers.set(u.captain_id, []);
-      captainUsers.get(u.captain_id).push(u);
-    }
     const userById = new Map(users.map((u) => [u.id, u]));
     const snapUsers = new Map();
     for (const s of snaps) {
@@ -244,15 +284,21 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
       if (!snapUsers.has(k)) snapUsers.set(k, []);
       snapUsers.get(k).push(s.user_id);
     }
+    // utenti per cui il giocatore e' il Capitano in carica in una data settimana
+    const captainOf = new Map();
+    for (const [uid, list] of terms) for (const t of list) {
+      if (!captainOf.has(t.player_id)) captainOf.set(t.player_id, []);
+      captainOf.get(t.player_id).push({ uid, start: t.start_week });
+    }
     const seeds = await seedInfo();
     const rows = [];
     for (const r of results) {
       const captainSet = new Set();
-      // RL-07/RL-20: il capitano segna sempre (anche con rosa vuota), x3; vale dalla settimana di iscrizione (RL-08).
-      for (const u of captainUsers.get(r.player_id) ?? []) {
-        if (u.reg_week <= r.week_start) {
-          captainSet.add(u.id);
-          rows.push([u.id, r.week_start, r.tournament_id, r.player_id, pointsFor(r.reached, true), 1]);
+      // RL-07/RL-20: il capitano segna sempre (anche con rosa vuota), x3, per le 12 settimane del suo mandato (dalla settimana d'iscrizione, RL-08).
+      for (const c of captainOf.get(r.player_id) ?? []) {
+        if (c.start <= r.week_start && r.week_start < termEnd(c.start) && userById.has(c.uid) && !captainSet.has(c.uid)) {
+          captainSet.add(c.uid);
+          rows.push([c.uid, r.week_start, r.tournament_id, r.player_id, pointsFor(r.reached, true), 1]);
         }
       }
       for (const uid of snapUsers.get(`${r.week_start}|${r.player_id}`) ?? []) {
@@ -292,6 +338,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
    */
   async function adminPicksReport() {
     const seeds = await seedInfo();
+    const terms = await loadTerms();
     const users = await db.all('SELECT id, telegram_id, team_name, captain_id, reg_week FROM users');
     users.sort((x, y) => x.team_name.localeCompare(y.team_name, 'it', { sensitivity: 'base' }) || x.id - y.id);
     const rosters = await db.all('SELECT user_id, week_start, player_ids FROM rosters');
@@ -341,8 +388,9 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
         }
       }
       for (const t of tournaments) { // capitano: dal suo settimana d'iscrizione, anche senza rosa
-        const reached = resultOf.get(`${t.id}|${u.captain_id}`);
-        if (reached && u.reg_week <= t.week_start) pts.set(t.id, (pts.get(t.id) ?? 0) + pointsFor(reached, true));
+        const capId = captainAt(terms.get(u.id), t.week_start);
+        const reached = capId ? resultOf.get(`${t.id}|${capId}`) : null;
+        if (reached) pts.set(t.id, (pts.get(t.id) ?? 0) + pointsFor(reached, true));
       }
       const total = [...pts.values()].reduce((n, x) => n + x, 0);
       return { u, picks, pts, medal, total };
@@ -364,7 +412,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     const main = head({ v: 'Capitano', s: STYLE.header });
     main[0][0] = { v: 'UPST', s: STYLE.bold };
     main[1][0] = { v: 'FantaChallenger', s: STYLE.bold };
-    const legend = [['SF', 2, '- Un giocatore per torneo (scelta settimanale)'], ['SF', 2, '- Capitano (verde): fisso, punti x3'], ['F', 5, '- Capitano: fuori dalla top-200 ATP'], ['W', 10, '- [x2] = Underdog (non testa di serie): punti x2']];
+    const legend = [['SF', 2, '- Un giocatore per torneo (scelta settimanale)'], ['SF', 2, '- Capitano (verde): 12 settimane, punti x3'], ['F', 5, '- Capitano: fuori dalla top-200 ATP'], ['W', 10, '- [x2] = Underdog (non testa di serie): punti x2']];
     const reachedRows = [['semifinalist', 0], ['semifinalist', 1], ['finalist', 0], ['winner', 0]];
     legend.forEach(([code, points, note], i) => {
       main.push([{ v: code, s: STYLE.center }, { v: points, s: STYLE.center }, note,
@@ -415,7 +463,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     const u = await db.get('SELECT id FROM users WHERE telegram_id = ?', [String(telegramId)]);
     if (!u) return { removed: 0 };
     await db.tx(async (t) => {
-      for (const table of ['points', 'roster_snapshots', 'rosters']) await t.run(`DELETE FROM ${table} WHERE user_id = ?`, [u.id]);
+      for (const table of ['points', 'roster_snapshots', 'rosters', 'captain_terms']) await t.run(`DELETE FROM ${table} WHERE user_id = ?`, [u.id]);
       await t.run('DELETE FROM users WHERE id = ?', [u.id]);
     });
     await recomputePoints();
@@ -426,7 +474,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
   async function deleteAllTeams(actor) {
     const n = (await db.get('SELECT COUNT(*) AS n FROM users')).n;
     await db.tx(async (t) => {
-      for (const table of ['points', 'roster_snapshots', 'rosters', 'users']) await t.run(`DELETE FROM ${table}`);
+      for (const table of ['points', 'roster_snapshots', 'rosters', 'captain_terms', 'users']) await t.run(`DELETE FROM ${table}`);
     });
     await audit(actor, 'admin:delete-all-teams', { removed: n });
     return { removed: n };
@@ -443,7 +491,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     const users = await db.all(`SELECT id FROM users WHERE telegram_id LIKE ?`, [`${DEMO_PREFIX}%`]);
     await db.tx(async (t) => {
       for (const u of users) {
-        for (const table of ['points', 'roster_snapshots', 'rosters']) await t.run(`DELETE FROM ${table} WHERE user_id = ?`, [u.id]);
+        for (const table of ['points', 'roster_snapshots', 'rosters', 'captain_terms']) await t.run(`DELETE FROM ${table} WHERE user_id = ?`, [u.id]);
         await t.run('DELETE FROM users WHERE id = ?', [u.id]);
       }
     });
@@ -525,13 +573,24 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     const ctx = await context();
     const base = { now: ctx.now.toISOString(), weekStart: ctx.weekStart, window: windowPayload(ctx), hasRanking: Boolean(ctx.refWeek) };
     if (!user) return { ...base, user: null };
-    const cap = (await listPlayersByIds(ctx, [user.captain_id]))[0] ?? null;
+    const terms = (await loadTerms()).get(user.id) ?? [];
+    const activeTerm = terms.find((t) => t.start_week <= ctx.weekStart && ctx.weekStart < termEnd(t.start_week));
+    const upcomingTerm = terms.find((t) => t.start_week > ctx.weekStart);
+    const shown = activeTerm ?? upcomingTerm ?? terms[terms.length - 1];
+    const cap0 = (await listPlayersByIds(ctx, [shown?.player_id ?? user.captain_id]))[0] ?? null;
+    const weeksBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 604800000);
+    const cap = cap0 && activeTerm ? { ...cap0, weeksLeft: weeksBetween(ctx.weekStart, termEnd(activeTerm.start_week)), startWeek: activeTerm.start_week } : null;
+    const captainUpcoming = !activeTerm && upcomingTerm && cap0 ? { ...cap0, startWeek: upcomingTerm.start_week } : null;
+    const captainExpired = !activeTerm && !upcomingTerm;
     const roster = await currentRoster(user, ctx);
     const registeredAfterClose = new Date(user.registered_at) >= ctx.closes;
     return {
       ...base,
       user: { teamName: user.team_name, registeredAt: user.registered_at },
       captain: cap,
+      captainUpcoming,
+      captainExpired,
+      captainWeeks: CAPTAIN_WEEKS,
       roster: { playerIds: roster.ids, players: roster.players, editable: ctx.open },
       tournaments: (await db.all(`SELECT id, name, location FROM tournaments WHERE week_start = ? AND status <> 'cancelled' ORDER BY name`, [ctx.weekStart])),
       points: await myPoints(user),
@@ -571,16 +630,17 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     const snapByWeek = new Map();
     const seeds = await seedInfo();
     const names = new Map();
+    const userTerms = user ? (await loadTerms()).get(user.id) ?? [] : [];
     if (user) {
       const snaps = await db.all('SELECT week_start, player_id FROM roster_snapshots WHERE user_id = ?', [user.id]);
       starred = new Set(snaps.map((s) => `${s.week_start}|${s.player_id}`));
       for (const sn of snaps) { if (!snapByWeek.has(sn.week_start)) snapByWeek.set(sn.week_start, []); snapByWeek.get(sn.week_start).push(sn.player_id); }
-      const ids = [...new Set([...snaps.map((x) => x.player_id), user.captain_id])];
+      const ids = [...new Set([...snaps.map((x) => x.player_id), ...userTerms.map((x) => x.player_id), user.captain_id])];
       for (const r of await db.all(`SELECT id, name, country FROM players WHERE id IN (${ids.map(() => '?').join(',')})`, ids)) names.set(r.id, r);
     }
     const weeks = new Map();
     for (const t of ts) {
-      const mark = (p) => ({ ...p, starred: starred.has(`${t.weekStart}|${p.playerId}`) || (user && p.playerId === user.captain_id && user.reg_week <= t.weekStart) });
+      const mark = (p) => ({ ...p, starred: starred.has(`${t.weekStart}|${p.playerId}`) || (user && p.playerId === captainAt(userTerms, t.weekStart)) });
       if (!weeks.has(t.weekStart)) weeks.set(t.weekStart, []);
       const card = { id: t.id, name: t.name, location: t.location, results: t.results.map(mark) };
       if (user) {
@@ -594,10 +654,11 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
           const underdog = !isCaptain && seeds.isUnderdog(t.id, id);
           return { playerId: id, name: e.name, country: e.country ?? null, reached, underdog, points: reached ? pointsFor(reached, isCaptain, underdog) : 0 };
         };
-        const capPlays = user.reg_week <= t.weekStart && entryOf(user.captain_id);
+        const capId = captainAt(userTerms, t.weekStart);
+        const capPlays = capId && entryOf(capId);
         card.mine = {
           pick: pickId ? line(pickId, false) : null,
-          captain: capPlays ? line(user.captain_id, true) : null,
+          captain: capPlays ? line(capId, true) : null,
         };
       }
       weeks.get(t.weekStart).push(card);
@@ -775,7 +836,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     // puo' rigenerare dati finti dopo una pulizia.
     if (current !== 'mock' && (stored === 'mock' || mockish)) {
       await db.tx(async (t) => {
-        for (const table of ['points', 'roster_snapshots', 'snapshot_weeks', 'rosters', 'tournament_results', 'draw_entries', 'tournaments', 'rankings', 'players', 'users', 'job_runs']) {
+        for (const table of ['points', 'roster_snapshots', 'snapshot_weeks', 'rosters', 'captain_terms', 'tournament_results', 'draw_entries', 'tournaments', 'rankings', 'players', 'users', 'job_runs']) {
           await t.run(`DELETE FROM ${table}`);
         }
       });
@@ -958,6 +1019,6 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     recomputePoints, standings, completedTournaments, inProgressTournaments, nextWeekTournaments,
     resetQuota: async (actor) => { const r = await api.reset(); await audit(actor, 'admin:quota-reset', r); return r; },
     importRanking, importDraws, importResults, sendReminders, dueJobs, runJob, defaultKey, tick,
-    adminSetResults, adminStatus, adminPicksReport, seedDemoTeams, removeDemoTeams, deleteTeam, deleteAllTeams, audit, windowPayload, dayOfWeekOf, reconcileProvider,
+    adminSetResults, adminStatus, adminPicksReport, seedDemoTeams, removeDemoTeams, deleteTeam, deleteAllTeams, changeCaptain, audit, windowPayload, dayOfWeekOf, reconcileProvider,
   };
 }

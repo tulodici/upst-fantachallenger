@@ -11,6 +11,10 @@ const SCHEMA = [
     reg_week TEXT NOT NULL,
     registered_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS captain_terms (
+    user_id INTEGER NOT NULL, player_id TEXT NOT NULL, start_week TEXT NOT NULL,
+    PRIMARY KEY (user_id, start_week)
+  )`,
   `CREATE TABLE IF NOT EXISTS players (id TEXT PRIMARY KEY, name TEXT NOT NULL, country TEXT)`,
   `CREATE TABLE IF NOT EXISTS rankings (
     week_start TEXT NOT NULL, player_id TEXT NOT NULL, pos INTEGER NOT NULL,

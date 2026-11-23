@@ -6,7 +6,7 @@ Stack: Node 22 senza framework (backend HTTP + job schedulati), PostgreSQL, fron
 
 ## Regolamento
 
-1. **Scegli il Capitano.** Un giocatore fuori dalla top-200 ATP, fisso per tutta la stagione, con punti ×3.
+1. **Scegli il Capitano.** Un giocatore fuori dalla top-200 ATP, in carica per 12 settimane dalla scelta (poi se ne sceglie un altro), con punti ×3.
 2. **Ogni settimana scegli un giocatore per torneo** tra i partecipanti di ciascun Challenger in programma.
 3. **Bonus Underdog.** Un giocatore non testa di serie vale punti ×2 (non cumulabile con il Capitano).
 4. **Finestra di scelta.** Da lunedì 00:01 a martedì 15:00 (ora italiana); poi la rosa è congelata.
