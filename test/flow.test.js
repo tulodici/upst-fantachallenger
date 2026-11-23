@@ -329,3 +329,32 @@ test('bonus underdog x2: solo per giocatori senza testa di serie, non cumulabile
   assert.equal(pts.Underdog, 20); // vincitore non testa di serie: 10 x2
   assert.equal(pts.Capitano, 30); // capitano vincitore: x3, senza cumulare l'underdog
 });
+
+test('rosa in bozza di una settimana gia\' chiusa: viene congelata e i punti arrivano in classifica', async () => {
+  const h = await makeCore();
+  const { core, db } = h;
+  await bootstrap(h);
+  h.at(W, 10, 0);
+  const a = await core.register({ telegramId: '1', teamName: 'Alice', captainId: 'p300' });
+  const late = await core.register({ telegramId: '2', teamName: 'Late', captainId: 'p500' });
+  const opts = await core.pickOptions(await core.context());
+  const pick = opts[0].participants.find((p) => !['p300', 'p500'].includes(p.playerId)).playerId;
+  await core.saveRoster(a, [pick]);
+  // chiusura: snapshot della settimana creato (solo Alice ha una rosa)
+  h.at('2026-11-24', 15, 1);
+  await core.ensureSnapshots();
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM snapshot_weeks WHERE week_start = ?', [W])).n, 1);
+  // una rosa compare in bozza dopo la chiusura (es. salvata con la finestra di collaudo)
+  await db.run(`INSERT INTO rosters (user_id, week_start, player_ids, status, updated_at) VALUES (?, ?, ?, 'draft', ?)`,
+    [late.id, W, JSON.stringify([pick]), new Date().toISOString()]);
+  await core.ensureSnapshots();
+  assert.equal((await db.get('SELECT status FROM rosters WHERE user_id = ?', [late.id])).status, 'locked');
+  // risultati: il giocatore scelto vince il torneo -> entrambi segnano 10
+  const t = opts[0];
+  await core.adminSetResults('admin', { tournamentId: t.id, status: 'concluded', results: [{ playerId: pick, reached: 'winner' }] });
+  const rows = await core.standings();
+  const pts = Object.fromEntries(rows.map((r) => [r.teamName, r.points]));
+  assert.equal(pts.Alice, pts.Late);
+  assert.ok(pts.Late >= 10);
+  assert.equal((await core.snapshotWeek(W)).created, false); // di nuovo idempotente
+});

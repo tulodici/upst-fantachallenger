@@ -160,11 +160,14 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
     const { closes } = windowOf(weekStart);
     if (!force && clock() < closes) return { created: false, reason: 'finestra ancora aperta' };
     const exists = await db.get('SELECT week_start FROM snapshot_weeks WHERE week_start = ?', [weekStart]);
-    if (exists) return { created: false, reason: 'già presente' };
+    // Una settimana gia' chiusa puo' avere rose ancora in bozza (salvate dopo la chiusura, es. con la finestra di collaudo):
+    // vanno comunque congelate, altrimenti i loro punti non arrivano mai in classifica.
+    const pending = await db.get(`SELECT COUNT(*) AS n FROM rosters WHERE week_start = ? AND status = 'draft'`, [weekStart]);
+    if (exists && !pending.n) return { created: false, reason: 'già presente' };
     const refRow = await db.get('SELECT MAX(week_start) AS w FROM rankings WHERE week_start < ?', [weekStart]);
     let count = 0;
     await db.tx(async (t) => {
-      const rosters = await t.all(`SELECT * FROM rosters WHERE week_start = ?`, [weekStart]);
+      const rosters = await t.all(`SELECT * FROM rosters WHERE week_start = ? AND status = 'draft'`, [weekStart]);
       for (const r of rosters) {
         const ids = JSON.parse(r.player_ids);
         const pos = new Map();
@@ -182,7 +185,7 @@ export function createCore({ db, provider, api, bot, clock, config = {} }) {
         }
         await t.run(`UPDATE rosters SET status = 'locked' WHERE user_id = ? AND week_start = ?`, [r.user_id, weekStart]);
       }
-      await t.run('INSERT INTO snapshot_weeks (week_start, created_at) VALUES (?, ?)', [weekStart, iso()]);
+      await t.run('INSERT INTO snapshot_weeks (week_start, created_at) VALUES (?, ?) ON CONFLICT DO NOTHING', [weekStart, iso()]);
     });
     return { created: true, entries: count };
   }
